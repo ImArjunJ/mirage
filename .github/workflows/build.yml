@@ -1,0 +1,51 @@
+name: build
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            compiler: clang++-18
+          - os: windows-latest
+            compiler: cl
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: install deps (linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake clang-18 libssl-dev libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libvulkan-dev glslc libx11-dev
+      - name: install deps (windows)
+        if: runner.os == 'Windows'
+        run: |
+          vcpkg install openssl ffmpeg vulkan glslc
+      - name: build (linux)
+        if: runner.os == 'Linux'
+        run: |
+          cmake -B build -DCMAKE_CXX_COMPILER=clang++-18 -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j$(nproc)
+      - name: build (windows)
+        if: runner.os == 'Windows'
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake
+          cmake --build build --config Release -j $env:NUMBER_OF_PROCESSORS
+      - name: verify (linux)
+        if: runner.os == 'Linux'
+        run: ./build/mirage --version
+      - name: verify (windows)
+        if: runner.os == 'Windows'
+        run: ./build/Release/mirage.exe --version
+      - name: upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mirage-${{ runner.os }}
+          path: |
+            build/mirage
+            build/Release/mirage.exe
+          if-no-files-found: ignore

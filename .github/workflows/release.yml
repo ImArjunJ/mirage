@@ -1,0 +1,70 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            compiler: clang++-18
+            artifact: linux-x86_64
+          - os: windows-latest
+            compiler: cl
+            artifact: windows-x86_64
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: install deps (linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake clang-18 libssl-dev libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libvulkan-dev glslc libx11-dev
+      - name: install deps (windows)
+        if: runner.os == 'Windows'
+        run: |
+          vcpkg install openssl ffmpeg vulkan glslc
+      - name: build (linux)
+        if: runner.os == 'Linux'
+        run: |
+          cmake -B build -DCMAKE_CXX_COMPILER=clang++-18 -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j$(nproc)
+      - name: build (windows)
+        if: runner.os == 'Windows'
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake
+          cmake --build build --config Release -j $env:NUMBER_OF_PROCESSORS
+      - name: package (linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p mirage-${{ github.ref_name }}-${{ matrix.artifact }}
+          cp build/mirage README.md LICENSE mirage-${{ github.ref_name }}-${{ matrix.artifact }}/
+          zip -r mirage-${{ github.ref_name }}-${{ matrix.artifact }}.zip mirage-${{ github.ref_name }}-${{ matrix.artifact }}/
+      - name: package (windows)
+        if: runner.os == 'Windows'
+        run: |
+          New-Item -ItemType Directory -Path mirage-${{ github.ref_name }}-${{ matrix.artifact }}
+          Copy-Item build/Release/mirage.exe, README.md, LICENSE mirage-${{ github.ref_name }}-${{ matrix.artifact }}/
+          Compress-Archive -Path mirage-${{ github.ref_name }}-${{ matrix.artifact }}/* -DestinationPath mirage-${{ github.ref_name }}-${{ matrix.artifact }}.zip
+      - name: upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mirage-${{ matrix.artifact }}
+          path: mirage-${{ github.ref_name }}-${{ matrix.artifact }}.zip
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: mirage-*.zip
