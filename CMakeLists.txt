@@ -107,20 +107,28 @@ add_executable(mirage
     src/protocols/rtsp_server.cpp
     src/protocols/cast_channel.cpp
     src/protocols/wfd_session.cpp
-    src/io/epoll_loop.cpp
-    src/io/iocp_loop.cpp
     src/io/tcp.cpp
     src/io/udp.cpp
     src/platform/window.cpp
-    src/platform/window_wayland.cpp
-    src/platform/window_x11.cpp
-    src/platform/window_win32.cpp
     src/platform/audio_out.cpp
-    src/platform/audio_pulse.cpp
-    src/platform/audio_alsa.cpp
-    src/platform/audio_wasapi.cpp
     ${SHADER_OUTPUTS}
 )
+
+if(WIN32)
+    target_sources(mirage PRIVATE
+        src/io/iocp_loop.cpp
+        src/platform/window_win32.cpp
+        src/platform/audio_wasapi.cpp
+    )
+else()
+    target_sources(mirage PRIVATE
+        src/io/epoll_loop.cpp
+        src/platform/window_wayland.cpp
+        src/platform/window_x11.cpp
+        src/platform/audio_pulse.cpp
+        src/platform/audio_alsa.cpp
+    )
+endif()
 
 target_include_directories(mirage PRIVATE ${CMAKE_SOURCE_DIR}/src)
 if(EXISTS /opt/cuda/include)

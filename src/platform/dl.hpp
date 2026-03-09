@@ -1,4 +1,7 @@
 #pragma once
+
+#ifndef _WIN32
+
 #include <utility>
 
 #include <dlfcn.h>
@@ -43,3 +46,5 @@ private:
 };
 
 }  // namespace mirage::platform
+
+#endif

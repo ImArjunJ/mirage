@@ -8,8 +8,13 @@
 #include <string_view>
 #include <variant>
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
 #include <unistd.h>
+#endif
 
 namespace mirage::io {
 
