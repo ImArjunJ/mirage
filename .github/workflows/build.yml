@@ -25,7 +25,7 @@ jobs:
       - name: install deps (windows)
         if: runner.os == 'Windows'
         run: |
-          vcpkg install openssl ffmpeg[avcodec,avformat,avutil,swresample]:x64-windows vulkan:x64-windows shaderc:x64-windows
+          vcpkg install openssl:x64-windows ffmpeg:x64-windows vulkan:x64-windows shaderc:x64-windows
       - name: build (linux)
         if: runner.os == 'Linux'
         run: |
