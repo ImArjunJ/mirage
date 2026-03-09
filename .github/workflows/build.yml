@@ -7,6 +7,7 @@ on:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-24.04
@@ -21,10 +22,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake clang-18 libssl-dev libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libvulkan-dev glslc libx11-dev
+      - name: install vulkan sdk (windows)
+        if: runner.os == 'Windows'
+        uses: humbletim/setup-vulkan-sdk@v1.2.0
+        with:
+          vulkan-query-version: 1.3.290.0
+          vulkan-components: Vulkan-Headers, Vulkan-Loader, Glslang, SPIRV-Tools
+          vulkan-use-cache: true
       - name: install deps (windows)
         if: runner.os == 'Windows'
         run: |
-          vcpkg install openssl ffmpeg vulkan glslc
+          vcpkg install openssl ffmpeg[avcodec,avformat,avutil,swresample]:x64-windows
       - name: build (linux)
         if: runner.os == 'Linux'
         run: |
