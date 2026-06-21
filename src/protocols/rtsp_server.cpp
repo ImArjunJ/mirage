@@ -1,11 +1,11 @@
-#include <array>
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <format>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -207,7 +207,8 @@ static std::optional<uint64_t> parse_uint(std::span<const std::byte> data, size_
     }
     return std::nullopt;
 }
-static std::optional<uint64_t> read_be(std::span<const std::byte> data, size_t offset, size_t nbytes) {
+static std::optional<uint64_t> read_be(std::span<const std::byte> data, size_t offset,
+                                       size_t nbytes) {
     if (nbytes == 0 || nbytes > 8 || offset + nbytes > data.size()) {
         return std::nullopt;
     }
@@ -356,8 +357,7 @@ static std::shared_ptr<plist_value> decode(std::span<const std::byte> data) {
     auto top_object = read_be(data, trailer + 16, 8);
     auto offset_table = read_be(data, trailer + 24, 8);
     if (!num_objects || !top_object || !offset_table || offset_size == 0 || ref_size == 0 ||
-        *num_objects > data.size() || *top_object >= *num_objects ||
-        *offset_table > data.size() ||
+        *num_objects > data.size() || *top_object >= *num_objects || *offset_table > data.size() ||
         *num_objects > (data.size() - static_cast<size_t>(*offset_table)) / offset_size) {
         return nullptr;
     }
@@ -366,7 +366,8 @@ static std::shared_ptr<plist_value> decode(std::span<const std::byte> data) {
     ctx.ref_size = ref_size;
     ctx.offsets.reserve(static_cast<size_t>(*num_objects));
     for (size_t i = 0; i < *num_objects; ++i) {
-        auto offset = read_be(data, static_cast<size_t>(*offset_table) + i * offset_size, offset_size);
+        auto offset =
+            read_be(data, static_cast<size_t>(*offset_table) + i * offset_size, offset_size);
         if (!offset || *offset >= data.size()) {
             return nullptr;
         }
@@ -483,7 +484,8 @@ static bool looks_like_alac(uint8_t first_byte) {
 static std::string_view audio_codec_label(uint8_t ct) {
     return ct == 2 ? "ALAC" : "AAC-ELD";
 }
-static std::optional<std::string_view> header_value(const rtsp_request& req, std::string_view name) {
+static std::optional<std::string_view> header_value(const rtsp_request& req,
+                                                    std::string_view name) {
     for (const auto& [key, value] : req.headers) {
         if (key.size() != name.size()) {
             continue;
@@ -871,9 +873,11 @@ result<rtsp_response> rtsp_session::handle_info(const rtsp_request& /* req */) {
         </dict>
     </array>
 	    <key>features</key>
-	    <integer>)" + std::to_string(airplay::feature_low) + R"(</integer>
+	    <integer>)" + std::to_string(airplay::feature_low) +
+                        R"(</integer>
 	    <key>initialVolume</key>
-	    <real>)" + std::format("{:.1f}", airplay::initial_volume_db) + R"(</real>
+	    <real>)" + std::format("{:.1f}", airplay::initial_volume_db) +
+                        R"(</real>
     <key>keepAliveLowPower</key>
     <integer>1</integer>
     <key>keepAliveSendStatsAsBody</key>
@@ -881,7 +885,8 @@ result<rtsp_response> rtsp_session::handle_info(const rtsp_request& /* req */) {
     <key>macAddress</key>
     <string>DC:46:28:54:D9:0E</string>
 	    <key>model</key>
-	    <string>)" + std::string(airplay::compatibility_model) + R"(</string>
+	    <string>)" + std::string(airplay::compatibility_model) +
+                        R"(</string>
     <key>name</key>
     <string>mirage</string>
     <key>pi</key>
@@ -889,11 +894,14 @@ result<rtsp_response> rtsp_session::handle_info(const rtsp_request& /* req */) {
     <key>pk</key>
     <data>)" + pk_b64 + R"(</data>
 	    <key>sourceVersion</key>
-	    <string>)" + std::string(airplay::info_source_version) + R"(</string>
+	    <string>)" + std::string(airplay::info_source_version) +
+                        R"(</string>
 	    <key>statusFlags</key>
-	    <integer>)" + std::to_string(airplay::status_flags) + R"(</integer>
+	    <integer>)" + std::to_string(airplay::status_flags) +
+                        R"(</integer>
 	    <key>vv</key>
-	    <integer>)" + std::to_string(airplay::protocol_version) + R"(</integer>
+	    <integer>)" + std::to_string(airplay::protocol_version) +
+                        R"(</integer>
 </dict>
 </plist>
 )";
@@ -1142,9 +1150,9 @@ result<rtsp_response> rtsp_session::handle_announce(const rtsp_request& req) {
         auto fmtp_pos = sdp.find("a=fmtp:");
         if (fmtp_pos != std::string::npos) {
             auto line_end = sdp.find('\n', fmtp_pos);
-            auto line = std::string_view{sdp}.substr(
-                fmtp_pos, line_end == std::string::npos ? std::string_view::npos
-                                                        : line_end - fmtp_pos);
+            auto line = std::string_view{sdp}.substr(fmtp_pos, line_end == std::string::npos
+                                                                   ? std::string_view::npos
+                                                                   : line_end - fmtp_pos);
             auto values_start = line.find(' ');
             if (values_start != std::string_view::npos) {
                 auto values = parse_sdp_ints(line.substr(values_start + 1));
@@ -1244,8 +1252,7 @@ io::task<result<rtsp_response>> rtsp_session::handle_setup(const rtsp_request& r
     bool is_streams_setup = bplist::has_streams(req.body);
     auto transport = header_value(req, "Transport");
     bool is_raop_transport_setup =
-        !is_streams_setup && transport &&
-        transport->find("RTP/AVP/UDP") != std::string_view::npos;
+        !is_streams_setup && transport && transport->find("RTP/AVP/UDP") != std::string_view::npos;
     if (is_raop_transport_setup) {
         if (auto control_port = parse_transport_port(*transport, "control_port")) {
             audio_control_remote_ = io::endpoint{socket_.remote_endpoint().addr, *control_port};
@@ -1346,10 +1353,9 @@ io::task<result<rtsp_response>> rtsp_session::handle_setup(const rtsp_request& r
             .headers =
                 {
                     {"CSeq", std::to_string(cseq_)},
-                    {"Transport",
-                     std::format("RTP/AVP/UDP;unicast;mode=record;server_port={};"
-                                 "control_port={};timing_port={}",
-                                 audio_port, audio_control_port, timing_port)},
+                    {"Transport", std::format("RTP/AVP/UDP;unicast;mode=record;server_port={};"
+                                              "control_port={};timing_port={}",
+                                              audio_port, audio_control_port, timing_port)},
                     {"Session", "1"},
                     {"Audio-Latency",
                      std::to_string(airplay::audio_latency_samples(audio_sample_rate_))},
@@ -1436,7 +1442,8 @@ io::task<result<rtsp_response>> rtsp_session::handle_setup(const rtsp_request& r
             }
             if (audio_format) {
                 mirage::log::info(
-                    "SETUP type 96: audio data={}, ctrl={}, ct={}, spf={}, sr={}, audioFormat=0x{:x}",
+                    "SETUP type 96: audio data={}, ctrl={}, ct={}, spf={}, sr={}, "
+                    "audioFormat=0x{:x}",
                     audio_port, audio_control_port, audio_ct_, audio_spf_, audio_sample_rate_,
                     *audio_format);
             } else {
@@ -1576,8 +1583,7 @@ auto rtsp_session::run_udp_receiver(io::udp_socket& sock, const char* name) -> i
             }
         }
     } catch (const std::system_error& e) {
-        if (state_ != rtsp_session_state::teardown &&
-            e.code() != std::errc::operation_canceled) {
+        if (state_ != rtsp_session_state::teardown && e.code() != std::errc::operation_canceled) {
             mirage::log::debug("UDP {} receiver ended: {}", name, e.what());
         }
     }
@@ -1616,8 +1622,7 @@ io::task<void> rtsp_session::run_ntp_timing_sender() {
             co_await timer.async_wait();
         }
     } catch (const std::system_error& e) {
-        if (state_ != rtsp_session_state::teardown &&
-            e.code() != std::errc::operation_canceled) {
+        if (state_ != rtsp_session_state::teardown && e.code() != std::errc::operation_canceled) {
             mirage::log::debug("NTP timing sender ended: {}", e.what());
         }
     }
@@ -1654,8 +1659,9 @@ io::task<void> rtsp_session::run_mirror_receiver() {
             std::optional<crypto::aes_ctr_decryptor> video_decryptor;
             if (stream_connection_id_ != 0) {
                 if (fp_keymsg_.size() == 164 && fp_ekey_.size() == 72) {
-                    mirage::log::debug("FairPlay key material present: keymsg={} bytes, ekey={} bytes",
-                                       fp_keymsg_.size(), fp_ekey_.size());
+                    mirage::log::debug(
+                        "FairPlay key material present: keymsg={} bytes, ekey={} bytes",
+                        fp_keymsg_.size(), fp_ekey_.size());
                     std::array<std::byte, 164> keymsg_arr;
                     std::array<std::byte, 72> ekey_arr;
                     std::copy(fp_keymsg_.begin(), fp_keymsg_.end(), keymsg_arr.begin());
@@ -1675,8 +1681,9 @@ io::task<void> rtsp_session::run_mirror_receiver() {
                     std::array<std::byte, 16> video_iv;
                     std::copy_n(key_hash.begin(), 16, video_key.begin());
                     std::copy_n(iv_hash.begin(), 16, video_iv.begin());
-                    mirage::log::debug("Derived video decryption material for streamConnectionID={}",
-                                       stream_connection_id_);
+                    mirage::log::debug(
+                        "Derived video decryption material for streamConnectionID={}",
+                        stream_connection_id_);
                     auto decryptor = crypto::aes_ctr_decryptor::create(video_key, video_iv);
                     if (decryptor) {
                         video_decryptor = std::move(*decryptor);
@@ -1753,8 +1760,8 @@ io::task<void> rtsp_session::run_mirror_receiver() {
                         }
                         if (video_decryptor && payload_size > 0) {
                             if (frame_count <= 3) {
-                            mirage::log::trace("Frame {} decrypting {} bytes", frame_count,
-                                               payload_size);
+                                mirage::log::trace("Frame {} decrypting {} bytes", frame_count,
+                                                   payload_size);
                             }
                             std::vector<std::byte> decrypted(payload_size);
                             auto result = video_decryptor->decrypt(payload, decrypted);
@@ -1969,7 +1976,8 @@ void rtsp_session::process_audio_packet(std::span<const std::byte> rtp_packet, s
     auto first_payload_byte = static_cast<uint8_t>(decrypted[0]);
     if (audio_ct_ == 2 && !looks_like_alac(first_payload_byte)) {
         if (looks_like_aac_eld(first_payload_byte)) {
-            mirage::log::warn("Audio payload looks like AAC-ELD while configured as ALAC; switching");
+            mirage::log::warn(
+                "Audio payload looks like AAC-ELD while configured as ALAC; switching");
             audio_ct_ = 8;
             audio_spf_ = 480;
             audio_decoder_ = audio::audio_decoder::create_aac(audio_sample_rate_, audio_channels_);
@@ -1989,7 +1997,8 @@ void rtsp_session::process_audio_packet(std::span<const std::byte> rtp_packet, s
         ++audio_invalid_payload_count_;
         if (audio_invalid_payload_count_ <= 5 || audio_invalid_payload_count_ % 500 == 0) {
             if (looks_like_alac(first_payload_byte)) {
-                mirage::log::warn("Audio payload looks like ALAC while configured as AAC-ELD; skipping");
+                mirage::log::warn(
+                    "Audio payload looks like ALAC while configured as AAC-ELD; skipping");
             } else {
                 mirage::log::warn("Skipping invalid AAC-ELD payload: first byte=0x{:02x}, len={}",
                                   first_payload_byte, decrypted.size());
@@ -2025,8 +2034,8 @@ bool rtsp_session::queue_audio_packet(std::span<const std::byte> rtp_packet, uin
         return false;
     }
 
-    auto duplicate = std::ranges::find(audio_pending_packets_, seqnum,
-                                       &buffered_audio_packet::seqnum);
+    auto duplicate =
+        std::ranges::find(audio_pending_packets_, seqnum, &buffered_audio_packet::seqnum);
     if (duplicate != audio_pending_packets_.end()) {
         ++audio_duplicate_packet_count_;
         if (audio_duplicate_packet_count_ <= 5 || audio_duplicate_packet_count_ % 500 == 0) {
@@ -2166,8 +2175,8 @@ io::task<void> rtsp_session::run_audio_receiver() {
                         audio_resend_pending_start_ != next_audio_seqnum_) {
                         co_await send_audio_resend_request(
                             next_audio_seqnum_,
-                            static_cast<uint16_t>(
-                                std::min(gap, static_cast<int>(airplay::max_audio_resend_packets))));
+                            static_cast<uint16_t>(std::min(
+                                gap, static_cast<int>(airplay::max_audio_resend_packets))));
                     }
                 }
             }
@@ -2187,8 +2196,7 @@ io::task<void> rtsp_session::run_audio_receiver() {
         audio_player_->stop();
     }
     const char* audio_health = (audio_gap_count_ == 0 && audio_resend_request_count_ == 0 &&
-                                audio_invalid_payload_count_ == 0 &&
-                                audio_pending_packets_.empty())
+                                audio_invalid_payload_count_ == 0 && audio_pending_packets_.empty())
                                    ? "clean"
                                    : "attention";
     mirage::log::diagnostic(
@@ -2253,7 +2261,8 @@ result<rtsp_response> rtsp_session::handle_record(const rtsp_request& /* req */)
         .headers =
             {
                 {"CSeq", std::to_string(cseq_)},
-                {"Audio-Latency", std::to_string(airplay::audio_latency_samples(audio_sample_rate_))},
+                {"Audio-Latency",
+                 std::to_string(airplay::audio_latency_samples(audio_sample_rate_))},
                 {"Audio-Jack-Status", "connected; type=analog"},
             },
         .body = {},
