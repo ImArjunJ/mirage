@@ -16,7 +16,7 @@ jobs:
             compiler: cl
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: install deps (linux)
         if: runner.os == 'Linux'
         run: |
@@ -30,7 +30,7 @@ jobs:
           "rev=$rev" >> $env:GITHUB_OUTPUT
       - name: cache vcpkg (windows)
         if: runner.os == 'Windows'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ${{ github.workspace }}/vcpkg_installed
@@ -68,7 +68,7 @@ jobs:
         if: runner.os == 'Windows'
         run: ./build/Release/mirage.exe --version
       - name: upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mirage-${{ runner.os }}
           path: |

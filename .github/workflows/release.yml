@@ -17,7 +17,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: install deps (linux)
         if: runner.os == 'Linux'
         run: |
@@ -31,7 +31,7 @@ jobs:
           "rev=$rev" >> $env:GITHUB_OUTPUT
       - name: cache vcpkg (windows)
         if: runner.os == 'Windows'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ${{ github.workspace }}/vcpkg_installed
@@ -75,7 +75,7 @@ jobs:
           Copy-Item build/Release/mirage.exe, README.md, LICENSE mirage-${{ github.ref_name }}-${{ matrix.artifact }}/
           Compress-Archive -Path mirage-${{ github.ref_name }}-${{ matrix.artifact }}/* -DestinationPath mirage-${{ github.ref_name }}-${{ matrix.artifact }}.zip
       - name: upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mirage-${{ matrix.artifact }}
           path: mirage-${{ github.ref_name }}-${{ matrix.artifact }}.zip
@@ -86,7 +86,7 @@ jobs:
       contents: write
     steps:
       - name: download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           merge-multiple: true
       - name: release
