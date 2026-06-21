@@ -157,7 +157,7 @@ target_link_libraries(mirage PRIVATE
 )
 
 if(WIN32)
-    target_link_libraries(mirage PRIVATE ws2_32 ole32 uuid)
+    target_link_libraries(mirage PRIVATE ws2_32 mswsock ole32 uuid)
 endif()
 
 include(CTest)
