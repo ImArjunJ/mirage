@@ -48,7 +48,7 @@ elseif(MSVC)
 endif()
 
 if(WIN32)
-    add_compile_definitions(WIN32_LEAN_AND_MEAN NOMINMAX)
+    add_compile_definitions(WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
 endif()
 
 find_package(OpenSSL REQUIRED)
