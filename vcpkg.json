@@ -1,0 +1,11 @@
+{
+  "name": "mirage",
+  "version-string": "0.1.0",
+  "builtin-baseline": "a0b1c8d3a477c1cb4813d8e127a56961707ca42b",
+  "dependencies": [
+    "ffmpeg",
+    "openssl",
+    "shaderc",
+    "vulkan"
+  ]
+}
