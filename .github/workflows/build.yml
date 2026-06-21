@@ -39,6 +39,7 @@ jobs:
           restore-keys: vcpkg-x64-windows-${{ steps.vcpkg-rev.outputs.rev }}-
       - name: install deps (windows)
         if: runner.os == 'Windows'
+        timeout-minutes: 90
         run: |
           $cache = Join-Path $env:GITHUB_WORKSPACE ".vcpkg-binary-cache"
           New-Item -ItemType Directory -Force $cache | Out-Null
@@ -53,8 +54,12 @@ jobs:
           cmake --build build --target mirage -j$(nproc)
       - name: build (windows)
         if: runner.os == 'Windows'
+        timeout-minutes: 20
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          $cache = Join-Path $env:GITHUB_WORKSPACE ".vcpkg-binary-cache"
+          $installed = Join-Path $env:GITHUB_WORKSPACE "vcpkg_installed"
+          $env:VCPKG_BINARY_SOURCES = "clear;files,$cache,readwrite"
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF "-DVCPKG_MANIFEST_INSTALL=OFF" "-DVCPKG_INSTALLED_DIR=$installed" "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
           cmake --build build --config Release --target mirage --parallel $env:NUMBER_OF_PROCESSORS
       - name: verify (linux)
         if: runner.os == 'Linux'
