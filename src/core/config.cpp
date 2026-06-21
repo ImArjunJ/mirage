@@ -59,6 +59,8 @@ result<config> config::load_from_file(std::string_view path) {
             cfg.hardware_decode = (val == "true" || val == "1");
         } else if (key == "log_level") {
             cfg.log_level = val;
+        } else if (key == "identity_key" || key == "identity_key_path") {
+            cfg.identity_key_path = val;
         }
     }
     return cfg;

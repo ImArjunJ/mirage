@@ -14,6 +14,7 @@ public:
     static result<ed25519_keypair> generate();
     static result<ed25519_keypair> from_private_key(std::span<const std::byte, 32> private_key);
     [[nodiscard]] std::array<std::byte, 32> public_key() const;
+    [[nodiscard]] result<std::array<std::byte, 32>> private_key() const;
     [[nodiscard]] result<std::array<std::byte, 64>> sign(std::span<const std::byte> message) const;
     [[nodiscard]] result<ed25519_keypair> clone() const;
     ed25519_keypair(const ed25519_keypair&) = delete;

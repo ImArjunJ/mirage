@@ -7,9 +7,10 @@
 
 namespace mirage::log {
 
-enum class level : int { debug = 0, info = 1, user = 2, warn = 3, error = 4 };
+enum class level : int { trace = 0, debug = 1, info = 2, user = 3, warn = 4, error = 5 };
 
 inline level min_level = level::user;
+inline bool diagnostics_enabled = false;
 
 namespace detail {
 inline void emit(std::string_view tag, std::string_view msg) {
@@ -18,6 +19,13 @@ inline void emit(std::string_view tag, std::string_view msg) {
     std::println(stderr, "[{:%Y-%m-%d %H:%M:%S}] [{}] {}", time, tag, msg);
 }
 }  // namespace detail
+
+template <typename... Args>
+void trace(std::format_string<Args...> fmt, Args&&... args) {
+    if (min_level <= level::trace) {
+        detail::emit("trace", std::format(fmt, std::forward<Args>(args)...));
+    }
+}
 
 template <typename... Args>
 void debug(std::format_string<Args...> fmt, Args&&... args) {
@@ -37,6 +45,13 @@ template <typename... Args>
 void user(std::format_string<Args...> fmt, Args&&... args) {
     if (min_level <= level::user) {
         std::println(stderr, "{}", std::format(fmt, std::forward<Args>(args)...));
+    }
+}
+
+template <typename... Args>
+void diagnostic(std::format_string<Args...> fmt, Args&&... args) {
+    if (diagnostics_enabled || min_level <= level::info) {
+        detail::emit("diag", std::format(fmt, std::forward<Args>(args)...));
     }
 }
 

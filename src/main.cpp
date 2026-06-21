@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
@@ -5,6 +7,7 @@
 #include <fstream>
 #include <print>
 #include <string>
+#include <system_error>
 
 #ifdef _WIN32
 #include <process.h>
@@ -18,6 +21,7 @@
 #include "core/log.hpp"
 #include "crypto/crypto.hpp"
 #include "discovery/discovery.hpp"
+#include "io/event_loop.hpp"
 #include "protocols/protocols.hpp"
 namespace {
 volatile std::sig_atomic_t signal_received = 0;
@@ -39,22 +43,39 @@ void print_help() {
     std::println(stderr, "  --name <name>       device name (default: Mirage)");
     std::println(stderr, "  --port <port>       airplay port (default: 7000)");
     std::println(stderr, "  --no-airplay        disable airplay");
-    std::println(stderr, "  --no-cast           disable google cast");
-    std::println(stderr, "  --no-miracast       disable miracast");
+    std::println(stderr, "  --cast              enable experimental google cast stub");
+    std::println(stderr, "  --miracast          enable experimental miracast stub");
+    std::println(stderr, "  --no-cast           disable google cast if enabled by config");
+    std::println(stderr, "  --no-miracast       disable miracast if enabled by config");
+    std::println(stderr, "  --no-mdns           disable built-in mdns broadcaster");
+    std::println(stderr, "  --diagnostics       show compact session summaries");
     std::println(stderr, "  --verbose           show more output");
-    std::println(stderr, "  --debug             show everything");
+    std::println(stderr, "  --debug             show protocol events");
+    std::println(stderr, "  --trace             show packet-level logs");
     std::println(stderr, "  --config <file>     config file path");
+    std::println(stderr, "                      default: per-user mirage/config.conf if present");
+    std::println(stderr, "  --identity-key <file>");
+    std::println(stderr, "                      persistent receiver identity key");
     std::println(stderr, "  --version           print version");
     std::println(stderr, "  --help              show this help");
 }
 
-void setup_logging(bool verbose, bool debug) {
-    if (debug) {
+void setup_logging(bool verbose, bool debug, bool trace, bool diagnostics) {
+    mirage::log::diagnostics_enabled = diagnostics;
+    if (trace) {
+        mirage::log::min_level = mirage::log::level::trace;
+    } else if (debug) {
         mirage::log::min_level = mirage::log::level::debug;
     } else if (verbose) {
         mirage::log::min_level = mirage::log::level::info;
     } else {
         mirage::log::min_level = mirage::log::level::user;
+    }
+}
+
+void drain_shutdown_work(mirage::io::io_context& ctx) {
+    for (int i = 0; i < 32; ++i) {
+        ctx.run_for(std::chrono::milliseconds(2));
     }
 }
 
@@ -82,12 +103,134 @@ std::filesystem::path state_dir() {
 #endif
 }
 
+std::filesystem::path config_dir() {
+#ifdef _WIN32
+    const char* appdata = std::getenv("APPDATA");
+    if (appdata && appdata[0] != '\0') {
+        return std::filesystem::path(appdata) / "mirage";
+    }
+    return state_dir();
+#else
+    const char* xdg = std::getenv("XDG_CONFIG_HOME");
+    if (xdg && xdg[0] != '\0') {
+        return std::filesystem::path(xdg) / "mirage";
+    }
+    const char* home = std::getenv("HOME");
+    if (!home) {
+        home = "/tmp";
+    }
+    return std::filesystem::path(home) / ".config" / "mirage";
+#endif
+}
+
+std::filesystem::path default_config_file_path() {
+    return config_dir() / "config.conf";
+}
+
 std::filesystem::path pid_file_path() {
     return state_dir() / "mirage.pid";
 }
 
 std::filesystem::path status_file_path() {
     return state_dir() / "status.json";
+}
+
+std::filesystem::path identity_key_path(const mirage::config& cfg) {
+    if (!cfg.identity_key_path.empty()) {
+        return std::filesystem::path(cfg.identity_key_path);
+    }
+    return state_dir() / "identity.key";
+}
+
+std::string trim_ascii(std::string value) {
+    while (!value.empty() &&
+           (value.back() == ' ' || value.back() == '\t' || value.back() == '\r' ||
+            value.back() == '\n')) {
+        value.pop_back();
+    }
+    size_t start = 0;
+    while (start < value.size() &&
+           (value[start] == ' ' || value[start] == '\t' || value[start] == '\r' ||
+            value[start] == '\n')) {
+        ++start;
+    }
+    if (start > 0) {
+        value.erase(0, start);
+    }
+    return value;
+}
+
+bool write_identity_key(const std::filesystem::path& path,
+                        const std::array<std::byte, 32>& private_key) {
+    std::error_code ec;
+    if (!path.parent_path().empty()) {
+        std::filesystem::create_directories(path.parent_path(), ec);
+        if (ec) {
+            mirage::log::warn("could not create identity key directory {}: {}",
+                              path.parent_path().string(), ec.message());
+            return false;
+        }
+    }
+
+    auto encoded = mirage::base64_encode(private_key);
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file) {
+        mirage::log::warn("could not write identity key: {}", path.string());
+        return false;
+    }
+    file << encoded << "\n";
+    file.close();
+    std::filesystem::permissions(path,
+                                 std::filesystem::perms::owner_read |
+                                     std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::replace, ec);
+    return true;
+}
+
+mirage::result<mirage::crypto::ed25519_keypair> load_or_create_identity_keypair(
+    const mirage::config& cfg) {
+    auto path = identity_key_path(cfg);
+    if (std::filesystem::exists(path)) {
+        std::ifstream file(path, std::ios::binary);
+        if (file) {
+            std::string encoded((std::istreambuf_iterator<char>(file)),
+                                std::istreambuf_iterator<char>());
+            auto decoded = mirage::base64_decode(trim_ascii(std::move(encoded)));
+            if (decoded && decoded->size() == 32) {
+                std::array<std::byte, 32> private_key{};
+                std::copy_n(decoded->begin(), private_key.size(), private_key.begin());
+                auto keypair = mirage::crypto::ed25519_keypair::from_private_key(private_key);
+                if (keypair) {
+                    mirage::log::info("loaded persistent receiver identity: {}", path.string());
+                    return keypair;
+                }
+                mirage::log::warn("identity key could not be loaded: {}", keypair.error().message);
+            } else if (decoded) {
+                mirage::log::warn("identity key has {} bytes, expected 32: {}", decoded->size(),
+                                  path.string());
+            } else {
+                mirage::log::warn("identity key is not valid base64: {}", decoded.error().message);
+            }
+        } else {
+            mirage::log::warn("could not open identity key: {}", path.string());
+        }
+    }
+
+    auto keypair = mirage::crypto::ed25519_keypair::generate();
+    if (!keypair) {
+        return std::unexpected(keypair.error());
+    }
+    auto private_key = keypair->private_key();
+    if (private_key) {
+        if (write_identity_key(path, *private_key)) {
+            mirage::log::info("created persistent receiver identity: {}", path.string());
+        } else {
+            mirage::log::warn("using transient receiver identity for this run");
+        }
+    } else {
+        mirage::log::warn("could not persist receiver identity: {}", private_key.error().message);
+    }
+    return keypair;
 }
 
 std::optional<int> read_pid_file() {
@@ -382,7 +525,10 @@ int main(int argc, char* argv[]) {
 
     mirage::config cfg;
     std::string config_file;
+    bool explicit_config_file = false;
     bool debug = false;
+    bool trace = false;
+    bool diagnostics = false;
     bool verbose = false;
     bool no_mdns = false;
     bool daemon_mode = false;
@@ -398,12 +544,42 @@ int main(int argc, char* argv[]) {
         }
         if (arg == "--config" && i + 1 < argc) {
             config_file = argv[++i];
+            explicit_config_file = true;
+        } else if ((arg == "--name" || arg == "--port" || arg == "--identity-key") &&
+                   i + 1 < argc) {
+            ++i;
+        }
+    }
+    if (config_file.empty()) {
+        auto default_config = default_config_file_path();
+        if (std::filesystem::exists(default_config)) {
+            config_file = default_config.string();
+        }
+    }
+    if (!config_file.empty()) {
+        auto loaded = mirage::config::load_from_file(config_file);
+        if (loaded) {
+            cfg = *loaded;
+        } else if (explicit_config_file) {
+            mirage::log::warn("failed to load config: {}", loaded.error().message);
+        }
+    }
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--config" && i + 1 < argc) {
+            ++i;
         } else if (arg == "--name" && i + 1 < argc) {
             cfg.device_name = argv[++i];
         } else if (arg == "--port" && i + 1 < argc) {
             cfg.airplay_port = static_cast<uint16_t>(std::stoi(argv[++i]));
+        } else if (arg == "--identity-key" && i + 1 < argc) {
+            cfg.identity_key_path = argv[++i];
         } else if (arg == "--no-airplay") {
             cfg.enable_airplay = false;
+        } else if (arg == "--cast") {
+            cfg.enable_cast = true;
+        } else if (arg == "--miracast") {
+            cfg.enable_miracast = true;
         } else if (arg == "--no-cast") {
             cfg.enable_cast = false;
         } else if (arg == "--no-miracast") {
@@ -412,21 +588,17 @@ int main(int argc, char* argv[]) {
             verbose = true;
         } else if (arg == "--debug") {
             debug = true;
+        } else if (arg == "--trace") {
+            trace = true;
+        } else if (arg == "--diagnostics") {
+            diagnostics = true;
         } else if (arg == "--no-mdns") {
             no_mdns = true;
         } else if (arg == "--daemon" || arg == "-d") {
             daemon_mode = true;
         }
     }
-    if (!config_file.empty() && std::filesystem::exists(config_file)) {
-        auto loaded = mirage::config::load_from_file(config_file);
-        if (loaded) {
-            cfg = *loaded;
-        } else {
-            mirage::log::warn("failed to load config: {}", loaded.error().message);
-        }
-    }
-    setup_logging(verbose, debug);
+    setup_logging(verbose, debug, trace, diagnostics);
 
     if (daemon_mode) {
 #ifdef _WIN32
@@ -439,21 +611,21 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 #endif
-        setup_logging(verbose, debug);
+        setup_logging(verbose, debug, trace, diagnostics);
     }
 
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
     try {
         mirage::io::io_context ctx;
-        auto keypair = mirage::crypto::ed25519_keypair::generate();
+        auto keypair = load_or_create_identity_keypair(cfg);
         if (!keypair) {
-            std::println(stderr, "crypto error: could not generate keypair.");
+            std::println(stderr, "crypto error: could not load or generate receiver identity.");
+            std::println(stderr, "  {}", keypair.error().message);
             std::println(stderr, "  this is unusual -- check that openssl is installed correctly.");
             return 1;
         }
         auto pubkey = keypair->public_key();
-        mirage::log::info("generated ed25519 public key");
         auto interfaces = mirage::discovery::enumerate_interfaces();
         if (!interfaces) {
             std::println(stderr, "no network interfaces found.");
@@ -571,6 +743,7 @@ int main(int argc, char* argv[]) {
         if (cast) {
             cast->stop();
         }
+        drain_shutdown_work(ctx);
         ctx.stop();
     } catch (const std::exception& e) {
         mirage::log::error("fatal: {}", e.what());

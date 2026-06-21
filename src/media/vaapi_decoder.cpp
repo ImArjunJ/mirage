@@ -11,9 +11,32 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/hwcontext_vaapi.h>
+#include <libavutil/log.h>
 }
 #endif
 namespace mirage::media {
+#ifdef __linux__
+namespace {
+
+class av_log_level_guard {
+public:
+    explicit av_log_level_guard(int level) : previous_(av_log_get_level()) {
+        av_log_set_level(level);
+    }
+
+    ~av_log_level_guard() {
+        av_log_set_level(previous_);
+    }
+
+    av_log_level_guard(const av_log_level_guard&) = delete;
+    av_log_level_guard& operator=(const av_log_level_guard&) = delete;
+
+private:
+    int previous_;
+};
+
+}  // namespace
+#endif
 struct vaapi_decoder::impl {
 #ifdef __linux__
     const AVCodec* codec = nullptr;
@@ -67,8 +90,13 @@ result<vaapi_decoder> vaapi_decoder::create(video_codec codec) {
     const char* devices[] = {"/dev/dri/renderD128", "/dev/dri/renderD129", nullptr};
     bool hw_init = false;
     for (const char** dev = devices; *dev != nullptr; ++dev) {
-        if (av_hwdevice_ctx_create(&impl_ptr->hw_device_ctx, AV_HWDEVICE_TYPE_VAAPI, *dev, nullptr,
-                                   0) == 0) {
+        int rc = 0;
+        {
+            av_log_level_guard quiet_probe{AV_LOG_QUIET};
+            rc = av_hwdevice_ctx_create(&impl_ptr->hw_device_ctx, AV_HWDEVICE_TYPE_VAAPI, *dev,
+                                        nullptr, 0);
+        }
+        if (rc == 0) {
             hw_init = true;
             break;
         }

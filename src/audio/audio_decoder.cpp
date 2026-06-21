@@ -1,4 +1,7 @@
+#include <array>
 #include <cstring>
+#include <limits>
+#include <string>
 
 #include "audio/audio.hpp"
 #include "core/log.hpp"
@@ -6,11 +9,21 @@
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/channel_layout.h>
+#include <libavutil/error.h>
 #include <libavutil/opt.h>
 #include <libswresample/swresample.h>
 }
 
 namespace mirage::audio {
+namespace {
+std::string av_error_string(int err) {
+    std::array<char, AV_ERROR_MAX_STRING_SIZE> buf{};
+    if (av_strerror(err, buf.data(), buf.size()) < 0) {
+        return std::to_string(err);
+    }
+    return std::string(buf.data());
+}
+}  // namespace
 
 struct audio_decoder::impl {
     const AVCodec* codec = nullptr;
@@ -229,12 +242,23 @@ std::vector<std::byte> audio_decoder::decode(std::span<const std::byte> packet_d
         return output;
     auto& p = *impl_;
 
-    p.packet->data = const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(packet_data.data()));
-    p.packet->size = static_cast<int>(packet_data.size());
+    if (packet_data.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        log::warn("audio packet too large: {} bytes", packet_data.size());
+        return output;
+    }
 
-    int ret = avcodec_send_packet(p.ctx, p.packet);
+    av_packet_unref(p.packet);
+    int ret = av_new_packet(p.packet, static_cast<int>(packet_data.size()));
     if (ret < 0) {
-        log::warn("avcodec_send_packet failed: {}", ret);
+        log::warn("av_new_packet failed: {} ({})", ret, av_error_string(ret));
+        return output;
+    }
+    std::memcpy(p.packet->data, packet_data.data(), packet_data.size());
+
+    ret = avcodec_send_packet(p.ctx, p.packet);
+    if (ret < 0) {
+        log::warn("avcodec_send_packet failed: {} ({})", ret, av_error_string(ret));
+        av_packet_unref(p.packet);
         return output;
     }
 
@@ -243,7 +267,7 @@ std::vector<std::byte> audio_decoder::decode(std::span<const std::byte> packet_d
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
             break;
         if (ret < 0) {
-            log::warn("avcodec_receive_frame failed: {}", ret);
+            log::warn("avcodec_receive_frame failed: {} ({})", ret, av_error_string(ret));
             break;
         }
 
@@ -271,8 +295,7 @@ std::vector<std::byte> audio_decoder::decode(std::span<const std::byte> packet_d
         av_frame_unref(p.frame);
     }
 
-    p.packet->data = nullptr;
-    p.packet->size = 0;
+    av_packet_unref(p.packet);
 
     return output;
 }

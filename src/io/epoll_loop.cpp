@@ -41,6 +41,14 @@ struct io_context::impl {
         ::close(epoll_fd);
     }
 
+    void resume_ready() {
+        std::vector<std::coroutine_handle<>> batch;
+        batch.swap(ready_queue);
+        for (auto h : batch) {
+            h.resume();
+        }
+    }
+
     void watch_fd(int fd, uint32_t events, std::coroutine_handle<> h, bool is_read) {
         auto it = fd_map.find(fd);
         if (it == fd_map.end()) {
@@ -77,6 +85,11 @@ struct io_context::impl {
     }
 
     void poll(int timeout_ms) {
+        if (!ready_queue.empty()) {
+            resume_ready();
+            return;
+        }
+
         std::array<epoll_event, 64> events{};
         int n = epoll_wait(epoll_fd, events.data(), static_cast<int>(events.size()), timeout_ms);
 
@@ -111,11 +124,7 @@ struct io_context::impl {
             }
         }
 
-        std::vector<std::coroutine_handle<>> batch;
-        batch.swap(ready_queue);
-        for (auto h : batch) {
-            h.resume();
-        }
+        resume_ready();
     }
 };
 

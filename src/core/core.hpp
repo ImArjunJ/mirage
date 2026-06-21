@@ -183,10 +183,11 @@ struct config {
     uint16_t cast_port = 8009;
     uint16_t miracast_port = 7236;
     bool enable_airplay = true;
-    bool enable_cast = true;
-    bool enable_miracast = true;
+    bool enable_cast = false;
+    bool enable_miracast = false;
     bool hardware_decode = true;
     std::string log_level = "info";
+    std::string identity_key_path;
     static result<config> load_from_file(std::string_view path);
     static config load_default() { return config{}; }
 };

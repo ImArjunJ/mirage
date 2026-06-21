@@ -32,7 +32,7 @@ io::task<void> cast_receiver::run() {
             auto socket = co_await impl_->acceptor.async_accept();
             mirage::log::info("Cast connection from {}", socket.remote_endpoint().addr.to_string());
         } catch (const std::system_error& e) {
-            if (e.code() != std::errc::operation_canceled) {
+            if (impl_->running && e.code() != std::errc::operation_canceled) {
                 mirage::log::warn("Cast accept error: {}", e.what());
             }
         }

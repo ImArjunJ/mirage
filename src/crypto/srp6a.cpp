@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <openssl/bn.h>
+#include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
 #include <openssl/sha.h>
@@ -33,6 +34,7 @@ struct srp6a::impl {
     BIGNUM* A = nullptr;
     BIGNUM* S = nullptr;
     std::vector<std::byte> salt_;
+    std::vector<std::byte> public_key_;
     std::vector<std::byte> session_key_;
     std::vector<std::byte> client_proof_;
     std::string username_;
@@ -131,16 +133,15 @@ result<srp6a> srp6a::create_server(std::string_view username, std::string_view p
     BN_free(kv);
     BN_free(gb);
     BN_CTX_free(ctx);
+    auto public_key = bn_to_padded_bytes(impl_ptr->B, impl_ptr->N_len);
+    impl_ptr->public_key_.resize(public_key.size());
+    for (size_t i = 0; i < public_key.size(); ++i) {
+        impl_ptr->public_key_[i] = static_cast<std::byte>(public_key[i]);
+    }
     return srp6a{std::move(impl_ptr)};
 }
 std::span<const std::byte> srp6a::get_public_key() const {
-    static std::vector<std::byte> pk_bytes;
-    auto padded = bn_to_padded_bytes(impl_->B, impl_->N_len);
-    pk_bytes.resize(padded.size());
-    for (size_t i = 0; i < padded.size(); ++i) {
-        pk_bytes[i] = static_cast<std::byte>(padded[i]);
-    }
-    return pk_bytes;
+    return impl_->public_key_;
 }
 std::span<const std::byte> srp6a::get_salt() const {
     return impl_->salt_;
@@ -151,7 +152,7 @@ std::span<const std::byte> srp6a::get_session_key() const {
 result<void> srp6a::compute_session_key(std::span<const std::byte> client_public_key) {
     impl_->A = BN_bin2bn(reinterpret_cast<const unsigned char*>(client_public_key.data()),
                          static_cast<int>(client_public_key.size()), nullptr);
-    if (!impl_->A) {
+    if (!impl_->A || BN_is_zero(impl_->A) || BN_cmp(impl_->A, impl_->N) >= 0) {
         return std::unexpected(mirage_error::crypto("invalid client public key"));
     }
     BN_CTX* ctx = BN_CTX_new();
@@ -183,6 +184,48 @@ result<void> srp6a::compute_session_key(std::span<const std::byte> client_public
     return {};
 }
 result<bool> srp6a::verify_client_proof(std::span<const std::byte> proof) {
+    if (!impl_->A || impl_->session_key_.empty()) {
+        return std::unexpected(mirage_error::crypto("SRP session key not established"));
+    }
+    if (proof.size() != SHA512_DIGEST_LENGTH) {
+        return false;
+    }
+    auto n_padded = bn_to_padded_bytes(impl_->N, impl_->N_len);
+    auto g_padded = bn_to_padded_bytes(impl_->g, impl_->N_len);
+    auto a_padded = bn_to_padded_bytes(impl_->A, impl_->N_len);
+    auto b_padded = bn_to_padded_bytes(impl_->B, impl_->N_len);
+
+    std::array<unsigned char, SHA512_DIGEST_LENGTH> n_hash{};
+    std::array<unsigned char, SHA512_DIGEST_LENGTH> g_hash{};
+    std::array<unsigned char, SHA512_DIGEST_LENGTH> user_hash{};
+    SHA512(n_padded.data(), n_padded.size(), n_hash.data());
+    SHA512(g_padded.data(), g_padded.size(), g_hash.data());
+    SHA512(reinterpret_cast<const unsigned char*>(impl_->username_.data()), impl_->username_.size(),
+           user_hash.data());
+    for (size_t i = 0; i < n_hash.size(); ++i) {
+        n_hash[i] ^= g_hash[i];
+    }
+
+    std::vector<unsigned char> m1_input;
+    m1_input.reserve(n_hash.size() + user_hash.size() + impl_->salt_.size() + a_padded.size() +
+                     b_padded.size() + impl_->session_key_.size());
+    m1_input.insert(m1_input.end(), n_hash.begin(), n_hash.end());
+    m1_input.insert(m1_input.end(), user_hash.begin(), user_hash.end());
+    m1_input.insert(m1_input.end(), reinterpret_cast<const unsigned char*>(impl_->salt_.data()),
+                    reinterpret_cast<const unsigned char*>(impl_->salt_.data()) +
+                        impl_->salt_.size());
+    m1_input.insert(m1_input.end(), a_padded.begin(), a_padded.end());
+    m1_input.insert(m1_input.end(), b_padded.begin(), b_padded.end());
+    m1_input.insert(m1_input.end(),
+                    reinterpret_cast<const unsigned char*>(impl_->session_key_.data()),
+                    reinterpret_cast<const unsigned char*>(impl_->session_key_.data()) +
+                        impl_->session_key_.size());
+
+    std::array<unsigned char, SHA512_DIGEST_LENGTH> expected{};
+    SHA512(m1_input.data(), m1_input.size(), expected.data());
+    if (CRYPTO_memcmp(expected.data(), proof.data(), expected.size()) != 0) {
+        return false;
+    }
     impl_->client_proof_.assign(proof.begin(), proof.end());
     return true;
 }

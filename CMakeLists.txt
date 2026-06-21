@@ -152,3 +152,29 @@ target_link_libraries(mirage PRIVATE
 if(WIN32)
     target_link_libraries(mirage PRIVATE ws2_32 ole32 uuid)
 endif()
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(mirage_srp6a_test
+        tests/test_srp6a.cpp
+        src/crypto/srp6a.cpp
+    )
+    target_include_directories(mirage_srp6a_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_options(mirage_srp6a_test PRIVATE ${MIRAGE_CXX_FLAGS})
+    target_link_options(mirage_srp6a_test PRIVATE ${MIRAGE_LINK_FLAGS})
+    target_link_libraries(mirage_srp6a_test PRIVATE OpenSSL::Crypto)
+    add_test(NAME srp6a COMMAND mirage_srp6a_test)
+
+    add_executable(mirage_airplay_protocol_test
+        tests/test_airplay_protocol.cpp
+    )
+    target_include_directories(mirage_airplay_protocol_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_options(mirage_airplay_protocol_test PRIVATE ${MIRAGE_CXX_FLAGS})
+    target_link_options(mirage_airplay_protocol_test PRIVATE ${MIRAGE_LINK_FLAGS})
+    add_test(NAME airplay_protocol COMMAND mirage_airplay_protocol_test)
+
+    if(UNIX)
+        add_test(NAME raop_smoke
+            COMMAND bash ${CMAKE_SOURCE_DIR}/tests/smoke_raop.sh $<TARGET_FILE:mirage>)
+    endif()
+endif()

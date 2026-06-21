@@ -53,7 +53,7 @@ std::unique_ptr<window> win32_window::try_create(std::string_view title, uint32_
     wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc = wndproc;
     wc.hInstance = hinst;
-    wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    wc.hCursor = LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_ARROW));
     wc.lpszClassName = kClassName;
 
     win->class_atom_ = RegisterClassExW(&wc);

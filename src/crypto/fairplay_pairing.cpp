@@ -54,6 +54,16 @@ std::array<std::byte, 32> ed25519_keypair::public_key() const {
     EVP_PKEY_get_raw_public_key(impl_->pkey, reinterpret_cast<unsigned char*>(pk.data()), &len);
     return pk;
 }
+result<std::array<std::byte, 32>> ed25519_keypair::private_key() const {
+    std::array<std::byte, 32> sk{};
+    size_t len = sk.size();
+    if (EVP_PKEY_get_raw_private_key(impl_->pkey, reinterpret_cast<unsigned char*>(sk.data()),
+                                     &len) <= 0 ||
+        len != sk.size()) {
+        return std::unexpected(mirage_error::crypto("failed to export Ed25519 private key"));
+    }
+    return sk;
+}
 result<std::array<std::byte, 64>> ed25519_keypair::sign(std::span<const std::byte> message) const {
     std::array<std::byte, 64> sig{};
     size_t sig_len = 64;
@@ -426,13 +436,7 @@ result<std::vector<std::byte>> fairplay_pairing::handle_m3(std::span<const std::
         return std::unexpected(mirage_error::crypto("pair-setup M3: proof verification failed"));
     }
     auto server_proof = impl_->srp->generate_server_proof();
-    std::string proof_hex;
-    for (const auto& b : server_proof) {
-        char buf[4];
-        snprintf(buf, sizeof(buf), "%02x ", static_cast<uint8_t>(b));
-        proof_hex += buf;
-    }
-    mirage::log::debug("M4 server proof ({} bytes): {}", server_proof.size(), proof_hex);
+    mirage::log::debug("M4 server proof generated: {} bytes", server_proof.size());
     std::vector<tlv8::item> response_items = {
         {tlv8::type::state, {std::byte{4}}},
         {tlv8::type::proof, std::move(server_proof)},

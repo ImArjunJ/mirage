@@ -11,6 +11,7 @@
 #include "core/core.hpp"
 #include "core/log.hpp"
 #include "discovery/discovery.hpp"
+#include "protocols/airplay_protocol.hpp"
 namespace mirage::discovery {
 namespace {
 constexpr uint16_t mdns_port = 5353;
@@ -91,22 +92,22 @@ void mdns_broadcaster::unregister_all() {
 }
 io::task<result<void>> mdns_broadcaster::announce() {
     auto a_packet = build_a_record_response();
-    mirage::log::debug("Announcing hostname A record: {} -> {} ({} bytes)", hostname_,
+    mirage::log::trace("Announcing hostname A record: {} -> {} ({} bytes)", hostname_,
                        local_address_.to_string(), a_packet.size());
     try {
         auto bytes_sent = co_await socket_.async_send_to(std::span<const std::byte>{a_packet},
                                                          multicast_endpoint_);
-        mirage::log::debug("Sent {} bytes to {}", bytes_sent, multicast_endpoint_.to_string());
+        mirage::log::trace("Sent {} bytes to {}", bytes_sent, multicast_endpoint_.to_string());
     } catch (const std::exception& e) {
         mirage::log::warn("Failed to send A record: {}", e.what());
     }
     for (const auto& service : services_) {
         auto packet = build_dns_response(service);
-        mirage::log::debug("Announcing service: {} ({} bytes)", service.name, packet.size());
+        mirage::log::trace("Announcing service: {} ({} bytes)", service.name, packet.size());
         try {
             auto bytes_sent = co_await socket_.async_send_to(std::span<const std::byte>{packet},
                                                              multicast_endpoint_);
-            mirage::log::debug("Sent service {} ({} bytes) to multicast", service.name, bytes_sent);
+            mirage::log::trace("Sent service {} ({} bytes) to multicast", service.name, bytes_sent);
         } catch (const std::exception& e) {
             co_return std::unexpected(mirage_error::network(
                 std::format("failed to send mDNS announcement: {}", e.what())));
@@ -129,7 +130,7 @@ io::task<void> mdns_broadcaster::run() {
                 co_await announce();
             }
         } catch (const std::system_error& e) {
-            if (e.code() != std::errc::operation_canceled) {
+            if (running_ && e.code() != std::errc::operation_canceled) {
                 mirage::log::warn("mDNS receive error: {}", e.what());
             }
         }
@@ -301,19 +302,25 @@ bool mdns_broadcaster::is_query_for_our_services(std::span<const std::byte> pack
                 qtype_str = std::to_string(qtype);
                 break;
         }
-        mirage::log::debug("mDNS query for: {} (type {} = {})", qname, qtype, qtype_str);
+        mirage::log::trace("mDNS query for: {} (type {} = {})", qname, qtype, qtype_str);
         if (qname == hostname_) {
             if (qtype == dns_type_a || qtype == dns_type_any || qtype == dns_type_aaaa) {
-                mirage::log::info("Query matches our hostname: {} (responding with A record)",
-                                  hostname_);
+                mirage::log::debug("Query matches our hostname: {} (responding with A record)",
+                                   hostname_);
                 return true;
             }
         }
         for (const auto& svc : services_) {
             auto service_fqdn = svc.service_type + "." + svc.domain;
             auto instance_fqdn = svc.name + "." + service_fqdn;
-            if (qname == service_fqdn || qname == instance_fqdn) {
-                mirage::log::info("Query matches service: {}", qname);
+            auto short_service = svc.service_type;
+            auto transport_suffix = short_service.find("._tcp");
+            if (transport_suffix != std::string::npos) {
+                short_service.erase(transport_suffix);
+            }
+            if (qname == service_fqdn || qname == instance_fqdn || qname == svc.service_type ||
+                qname == short_service) {
+                mirage::log::debug("Query matches service: {}", qname);
                 return true;
             }
         }
@@ -329,13 +336,13 @@ service_record create_airplay_service(std::string_view name, uint16_t port,
             .port = port,
             .txt_records = {
                 {"deviceid", std::string(mac_address)},
-                {"features", "0x5A7FFEE6,0x0"},
+                {"features", protocols::airplay::feature_txt()},
                 {"flags", "0x4"},
-                {"model", "AppleTV3,2"},
+                {"model", std::string(protocols::airplay::compatibility_model)},
                 {"pk", base64_encode(ed25519_pubkey)},
                 {"pi", generate_uuid()},
-                {"srcvers", "220.68"},
-                {"vv", "2"},
+                {"srcvers", std::string(protocols::airplay::source_version)},
+                {"vv", std::to_string(protocols::airplay::protocol_version)},
             }};
 }
 service_record create_raop_service(std::string_view name, uint16_t port,
@@ -351,22 +358,22 @@ service_record create_raop_service(std::string_view name, uint16_t port,
             .domain = "local",
             .port = port,
             .txt_records = {
-                {"am", "AppleTV3,2"},
-                {"ch", "2"},
+                {"am", std::string(protocols::airplay::compatibility_model)},
+                {"ch", std::to_string(protocols::airplay::default_channels)},
                 {"cn", "0,1,2,3"},
                 {"da", "true"},
                 {"et", "0,3,5"},
-                {"ft", "0x5A7FFEE6,0x0"},
+                {"ft", protocols::airplay::feature_txt()},
                 {"md", "0,1,2"},
                 {"pw", "false"},
                 {"sf", "0x4"},
-                {"sr", "44100"},
+                {"sr", std::to_string(protocols::airplay::default_sample_rate)},
                 {"ss", "16"},
                 {"sv", "false"},
                 {"tp", "UDP"},
                 {"vn", "65537"},
-                {"vs", "220.68"},
-                {"vv", "2"},
+                {"vs", std::string(protocols::airplay::source_version)},
+                {"vv", std::to_string(protocols::airplay::protocol_version)},
             }};
 }
 service_record create_cast_service(std::string_view name, uint16_t port, std::string_view uuid) {
