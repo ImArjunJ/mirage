@@ -4,13 +4,17 @@
 #include <csignal>
 #include <cstdlib>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <print>
 #include <string>
+#include <string_view>
 #include <system_error>
+#include <vector>
 
 #ifdef _WIN32
 #include <process.h>
+#include <winsock2.h>
 #include <windows.h>
 #else
 #include <fcntl.h>
@@ -42,6 +46,9 @@ void print_help() {
     std::println(stderr, "options:");
     std::println(stderr, "  --name <name>       device name (default: Mirage)");
     std::println(stderr, "  --port <port>       airplay port (default: 7000)");
+    std::println(stderr, "  --cast-port <port>  cast port (default: 8009)");
+    std::println(stderr, "  --miracast-port <port>");
+    std::println(stderr, "                      miracast port (default: 7236)");
     std::println(stderr, "  --no-airplay        disable airplay");
     std::println(stderr, "  --cast              enable experimental google cast stub");
     std::println(stderr, "  --miracast          enable experimental miracast stub");
@@ -133,6 +140,38 @@ std::filesystem::path pid_file_path() {
 
 std::filesystem::path status_file_path() {
     return state_dir() / "status.json";
+}
+
+std::string json_escape(std::string_view value) {
+    std::string out;
+    out.reserve(value.size() + 8);
+    for (char c : value) {
+        switch (c) {
+            case '\\':
+                out += "\\\\";
+                break;
+            case '"':
+                out += "\\\"";
+                break;
+            case '\n':
+                out += "\\n";
+                break;
+            case '\r':
+                out += "\\r";
+                break;
+            case '\t':
+                out += "\\t";
+                break;
+            default:
+                out.push_back(c);
+                break;
+        }
+    }
+    return out;
+}
+
+std::string json_bool(bool value) {
+    return value ? "true" : "false";
 }
 
 std::filesystem::path identity_key_path(const mirage::config& cfg) {
@@ -356,6 +395,71 @@ int handle_status(bool verbose) {
         }
     };
 
+    auto extract_bool_from = [](std::string_view object, const std::string& key) -> std::optional<bool> {
+        auto needle = "\"" + key + "\":";
+        auto pos = object.find(needle);
+        if (pos == std::string_view::npos) {
+            return std::nullopt;
+        }
+        pos += needle.size();
+        while (pos < object.size() && object[pos] == ' ') {
+            ++pos;
+        }
+        if (object.substr(pos, 4) == "true") {
+            return true;
+        }
+        if (object.substr(pos, 5) == "false") {
+            return false;
+        }
+        return std::nullopt;
+    };
+
+    auto extract_string_from = [](std::string_view object, const std::string& key) -> std::string {
+        auto needle = "\"" + key + "\":\"";
+        auto pos = object.find(needle);
+        if (pos == std::string_view::npos) {
+            return {};
+        }
+        pos += needle.size();
+        auto end = object.find('"', pos);
+        if (end == std::string_view::npos) {
+            return {};
+        }
+        return std::string(object.substr(pos, end - pos));
+    };
+
+    auto extract_int_from = [](std::string_view object, const std::string& key) -> std::optional<int64_t> {
+        auto needle = "\"" + key + "\":";
+        auto pos = object.find(needle);
+        if (pos == std::string_view::npos) {
+            return std::nullopt;
+        }
+        pos += needle.size();
+        while (pos < object.size() && object[pos] == ' ') {
+            ++pos;
+        }
+        try {
+            return std::stoll(std::string(object.substr(pos)));
+        } catch (...) {
+            return std::nullopt;
+        }
+    };
+
+    auto extract_protocol_object = [&](std::string_view id) -> std::string_view {
+        auto needle = std::string{"\"id\":\""} + std::string{id} + "\"";
+        auto id_pos = json.find(needle);
+        if (id_pos == std::string::npos) {
+            return {};
+        }
+        auto object_start = json.rfind('{', id_pos);
+        auto object_end = json.find('}', id_pos);
+        if (object_start == std::string::npos || object_end == std::string::npos ||
+            object_end <= object_start) {
+            return {};
+        }
+        return std::string_view(json).substr(object_start, object_end - object_start + 1);
+    };
+
     auto name = extract_string("name");
     auto ip = extract_string("ip");
     auto iface = extract_string("interface");
@@ -380,6 +484,32 @@ int handle_status(bool verbose) {
         }
         if (cast_port) {
             std::println(stderr, "  cast port: {}", *cast_port);
+        }
+        auto identity_key = extract_string("identity_key");
+        if (!identity_key.empty()) {
+            std::println(stderr, "  identity key: {}", identity_key);
+        }
+        std::println(stderr, "  protocols:");
+        for (auto id : {"airplay", "cast", "miracast"}) {
+            auto object = extract_protocol_object(id);
+            if (object.empty()) {
+                continue;
+            }
+            auto state = extract_string_from(object, "state");
+            auto port = extract_int_from(object, "port");
+            auto advertised = extract_bool_from(object, "advertised");
+            auto detail = extract_string_from(object, "detail");
+            std::string line = std::format("    {}: {}", id, state.empty() ? "unknown" : state);
+            if (port && *port > 0) {
+                line += std::format(", port {}", *port);
+            }
+            if (advertised) {
+                line += std::format(", advertised {}", *advertised ? "yes" : "no");
+            }
+            if (!detail.empty()) {
+                line += std::format(", {}", detail);
+            }
+            std::println(stderr, "{}", line);
         }
         auto started = extract_int("started");
         if (started) {
@@ -416,19 +546,38 @@ void remove_pid_file() {
 }
 
 void write_status_json(int pid, const mirage::config& cfg, const std::string& ip,
-                       const std::string& iface_name) {
+                       const std::string& iface_name, const std::filesystem::path& identity_path,
+                       const std::vector<mirage::receiver_adapter_status>& adapters) {
     auto now = std::chrono::system_clock::now();
     auto started = std::chrono::system_clock::to_time_t(now);
     auto path = status_file_path();
     std::ofstream f(path);
     f << "{";
     f << "\"pid\":" << pid;
-    f << ",\"name\":\"" << cfg.device_name << "\"";
-    f << ",\"ip\":\"" << ip << "\"";
-    f << ",\"interface\":\"" << iface_name << "\"";
+    f << ",\"name\":\"" << json_escape(cfg.device_name) << "\"";
+    f << ",\"ip\":\"" << json_escape(ip) << "\"";
+    f << ",\"interface\":\"" << json_escape(iface_name) << "\"";
+    f << ",\"identity_key\":\"" << json_escape(identity_path.string()) << "\"";
     f << ",\"airplay_port\":" << cfg.airplay_port;
     f << ",\"cast_port\":" << cfg.cast_port;
     f << ",\"started\":" << started;
+    f << ",\"protocols\":[";
+    for (size_t i = 0; i < adapters.size(); ++i) {
+        const auto& adapter = adapters[i];
+        if (i > 0) {
+            f << ",";
+        }
+        f << "{";
+        f << "\"id\":\"" << mirage::protocol_id(adapter.id) << "\"";
+        f << ",\"name\":\"" << mirage::to_string(adapter.id) << "\"";
+        f << ",\"state\":\"" << mirage::to_string(adapter.state) << "\"";
+        f << ",\"port\":" << adapter.port;
+        f << ",\"advertised\":" << json_bool(adapter.advertised);
+        f << ",\"experimental\":" << json_bool(adapter.experimental);
+        f << ",\"detail\":\"" << json_escape(adapter.detail) << "\"";
+        f << "}";
+    }
+    f << "]";
     f << ",\"clients\":[]";
     f << "}";
 }
@@ -572,6 +721,10 @@ int main(int argc, char* argv[]) {
             cfg.device_name = argv[++i];
         } else if (arg == "--port" && i + 1 < argc) {
             cfg.airplay_port = static_cast<uint16_t>(std::stoi(argv[++i]));
+        } else if (arg == "--cast-port" && i + 1 < argc) {
+            cfg.cast_port = static_cast<uint16_t>(std::stoi(argv[++i]));
+        } else if (arg == "--miracast-port" && i + 1 < argc) {
+            cfg.miracast_port = static_cast<uint16_t>(std::stoi(argv[++i]));
         } else if (arg == "--identity-key" && i + 1 < argc) {
             cfg.identity_key_path = argv[++i];
         } else if (arg == "--no-airplay") {
@@ -618,6 +771,7 @@ int main(int argc, char* argv[]) {
     std::signal(SIGTERM, signal_handler);
     try {
         mirage::io::io_context ctx;
+        auto receiver_identity_path = identity_key_path(cfg);
         auto keypair = load_or_create_identity_keypair(cfg);
         if (!keypair) {
             std::println(stderr, "crypto error: could not load or generate receiver identity.");
@@ -649,6 +803,35 @@ int main(int argc, char* argv[]) {
                 break;
             }
         }
+
+        std::vector<mirage::receiver_adapter_status> adapters{
+            {.id = mirage::protocol::airplay,
+             .state = cfg.enable_airplay ? mirage::receiver_adapter_state::unavailable
+                                         : mirage::receiver_adapter_state::disabled,
+             .port = cfg.airplay_port,
+             .advertised = false,
+             .experimental = true,
+             .detail = cfg.enable_airplay ? "rtsp/raop receiver" : "disabled by config"},
+            {.id = mirage::protocol::cast,
+             .state = cfg.enable_cast ? mirage::receiver_adapter_state::unavailable
+                                      : mirage::receiver_adapter_state::disabled,
+             .port = cfg.cast_port,
+             .advertised = false,
+             .experimental = true,
+             .detail = cfg.enable_cast ? "cast v2 stub" : "disabled by config"},
+            {.id = mirage::protocol::miracast,
+             .state = cfg.enable_miracast ? mirage::receiver_adapter_state::unavailable
+                                          : mirage::receiver_adapter_state::disabled,
+             .port = cfg.miracast_port,
+             .advertised = false,
+             .experimental = true,
+             .detail = cfg.enable_miracast ? "wfd stub" : "disabled by config"},
+        };
+        auto adapter = [&](mirage::protocol id) -> mirage::receiver_adapter_status& {
+            auto it = std::ranges::find(adapters, id, &mirage::receiver_adapter_status::id);
+            return *it;
+        };
+
         std::optional<mirage::discovery::mdns_broadcaster> mdns;
         if (!no_mdns) {
             mdns.emplace(ctx);
@@ -659,11 +842,15 @@ int main(int argc, char* argv[]) {
                 cfg.device_name, cfg.airplay_port, pubkey, mac_address);
             if (auto res = mdns->register_service(std::move(airplay_service)); !res) {
                 mirage::log::error("failed to register airplay service: {}", res.error().message);
+                adapter(mirage::protocol::airplay).detail = res.error().message;
             }
             auto raop_service = mirage::discovery::create_raop_service(
                 cfg.device_name, cfg.airplay_port, mac_address);
             if (auto res = mdns->register_service(std::move(raop_service)); !res) {
                 mirage::log::error("failed to register raop service: {}", res.error().message);
+                adapter(mirage::protocol::airplay).detail = res.error().message;
+            } else {
+                adapter(mirage::protocol::airplay).advertised = true;
             }
             mirage::log::info("airplay enabled on port {}", cfg.airplay_port);
         }
@@ -673,11 +860,11 @@ int main(int argc, char* argv[]) {
                 mirage::discovery::create_cast_service(cfg.device_name, cfg.cast_port, uuid);
             if (auto res = mdns->register_service(std::move(cast_service)); !res) {
                 mirage::log::error("failed to register cast service: {}", res.error().message);
+                adapter(mirage::protocol::cast).detail = res.error().message;
+            } else {
+                adapter(mirage::protocol::cast).advertised = true;
             }
             mirage::log::info("cast enabled on port {} (uuid: {})", cfg.cast_port, uuid);
-        }
-        if (cfg.enable_miracast) {
-            mirage::log::info("miracast enabled (stub)");
         }
         std::optional<mirage::protocols::rtsp_server> rtsp;
         if (cfg.enable_airplay) {
@@ -685,8 +872,12 @@ int main(int argc, char* argv[]) {
                 mirage::protocols::rtsp_server::bind(ctx, cfg.airplay_port, std::move(*keypair));
             if (server) {
                 rtsp.emplace(std::move(*server));
+                adapter(mirage::protocol::airplay).state =
+                    mirage::receiver_adapter_state::listening;
                 mirage::log::info("rtsp server on port {}", cfg.airplay_port);
             } else {
+                adapter(mirage::protocol::airplay).state = mirage::receiver_adapter_state::error;
+                adapter(mirage::protocol::airplay).detail = server.error().message;
                 std::println(stderr, "could not start airplay on port {}.", cfg.airplay_port);
                 std::println(stderr,
                              "  the port may be in use. try --port <port> to use a different one,");
@@ -698,11 +889,27 @@ int main(int argc, char* argv[]) {
             auto receiver = mirage::protocols::cast_receiver::bind(ctx, cfg.cast_port);
             if (receiver) {
                 cast.emplace(std::move(*receiver));
+                adapter(mirage::protocol::cast).state = mirage::receiver_adapter_state::listening;
                 mirage::log::info("cast receiver on port {}", cfg.cast_port);
             } else {
+                adapter(mirage::protocol::cast).state = mirage::receiver_adapter_state::error;
+                adapter(mirage::protocol::cast).detail = receiver.error().message;
                 std::println(stderr, "could not start cast on port {}.", cfg.cast_port);
                 std::println(stderr, "  the port may be in use. try a different port or check:");
                 std::println(stderr, "  lsof -i :{}", cfg.cast_port);
+            }
+        }
+        std::optional<mirage::protocols::wfd_session> wfd;
+        if (cfg.enable_miracast) {
+            auto session = mirage::protocols::wfd_session::create(ctx);
+            if (session) {
+                wfd.emplace(std::move(*session));
+                adapter(mirage::protocol::miracast).state = mirage::receiver_adapter_state::running;
+                mirage::log::info("miracast enabled (stub)");
+            } else {
+                adapter(mirage::protocol::miracast).state = mirage::receiver_adapter_state::error;
+                adapter(mirage::protocol::miracast).detail = session.error().message;
+                mirage::log::error("failed to start miracast: {}", session.error().message);
             }
         }
         if (mdns) {
@@ -714,9 +921,13 @@ int main(int argc, char* argv[]) {
         if (cast) {
             mirage::io::co_spawn(ctx, cast->run());
         }
+        if (wfd) {
+            mirage::io::co_spawn(ctx, wfd->run());
+        }
 
         if (daemon_mode) {
-            write_status_json(current_pid(), cfg, local_ip, iface_name);
+            write_status_json(current_pid(), cfg, local_ip, iface_name, receiver_identity_path,
+                              adapters);
         }
 
         mirage::log::user("mirage started{}",
@@ -726,6 +937,9 @@ int main(int argc, char* argv[]) {
         }
         if (cfg.enable_cast) {
             mirage::log::user("  cast on port {}", cfg.cast_port);
+        }
+        if (cfg.enable_miracast) {
+            mirage::log::user("  miracast enabled (stub)");
         }
         if (!daemon_mode) {
             mirage::log::user("  press ctrl+c to stop.");
@@ -739,9 +953,15 @@ int main(int argc, char* argv[]) {
         }
         if (rtsp) {
             rtsp->stop();
+            adapter(mirage::protocol::airplay).state = mirage::receiver_adapter_state::stopped;
         }
         if (cast) {
             cast->stop();
+            adapter(mirage::protocol::cast).state = mirage::receiver_adapter_state::stopped;
+        }
+        if (wfd) {
+            wfd->stop();
+            adapter(mirage::protocol::miracast).state = mirage::receiver_adapter_state::stopped;
         }
         drain_shutdown_work(ctx);
         ctx.stop();

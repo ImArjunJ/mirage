@@ -23,6 +23,50 @@ constexpr std::string_view to_string(protocol p) {
     }
     std::unreachable();
 }
+constexpr std::string_view protocol_id(protocol p) {
+    switch (p) {
+        case protocol::airplay:
+            return "airplay";
+        case protocol::cast:
+            return "cast";
+        case protocol::miracast:
+            return "miracast";
+    }
+    std::unreachable();
+}
+enum class receiver_adapter_state : uint8_t {
+    disabled,
+    unavailable,
+    listening,
+    running,
+    stopped,
+    error
+};
+constexpr std::string_view to_string(receiver_adapter_state state) {
+    switch (state) {
+        case receiver_adapter_state::disabled:
+            return "disabled";
+        case receiver_adapter_state::unavailable:
+            return "unavailable";
+        case receiver_adapter_state::listening:
+            return "listening";
+        case receiver_adapter_state::running:
+            return "running";
+        case receiver_adapter_state::stopped:
+            return "stopped";
+        case receiver_adapter_state::error:
+            return "error";
+    }
+    std::unreachable();
+}
+struct receiver_adapter_status {
+    mirage::protocol id;
+    receiver_adapter_state state = receiver_adapter_state::disabled;
+    uint16_t port = 0;
+    bool advertised = false;
+    bool experimental = false;
+    std::string detail;
+};
 enum class video_codec : uint8_t { h264, hevc, vp8, vp9, av1 };
 constexpr std::string_view to_string(video_codec c) {
     switch (c) {
