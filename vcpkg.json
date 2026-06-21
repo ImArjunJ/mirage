@@ -2,7 +2,15 @@
   "name": "mirage",
   "version-string": "0.1.0",
   "dependencies": [
-    "ffmpeg",
+    {
+      "name": "ffmpeg",
+      "default-features": false,
+      "features": [
+        "avcodec",
+        "avformat",
+        "swresample"
+      ]
+    },
     "openssl",
     "shaderc",
     "vulkan"
