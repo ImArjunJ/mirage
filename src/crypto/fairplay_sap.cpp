@@ -6412,9 +6412,11 @@ uint32_t shift_left_32(uint8_t input, int count) {
     return static_cast<uint32_t>((input << count) ^ (input >> (8 - count)));
 }
 
+#if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
 #pragma GCC diagnostic ignored "-Wparentheses"
+#endif
 void obfuscate_buffers(uint8_t* buffer0, uint8_t* buffer1, uint8_t* buffer2, uint8_t* buffer3,
                        uint8_t* buffer4) {
     unsigned int tmp;
@@ -6702,7 +6704,9 @@ void obfuscate_buffers(uint8_t* buffer0, uint8_t* buffer1, uint8_t* buffer2, uin
         ((buffer0[buffer3[120] % 20] << 1) * buffer1[5]) -
         (shift_left_8(buffer3[76], (buffer4[buffer3[124] % 21] & 7)) & (buffer3[20] + 110));
 }
+#if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop
+#endif
 
 void compute_custom_hash(uint8_t* block_in, uint8_t* key_out) {
     auto* block_words = reinterpret_cast<uint32_t*>(block_in);

@@ -7,6 +7,7 @@
 #include "io/event_loop.hpp"
 
 #include <mswsock.h>
+#include <winsock2.h>
 #include <windows.h>
 
 namespace mirage::io {

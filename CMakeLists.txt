@@ -41,7 +41,14 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         set(MIRAGE_LINK_FLAGS -fsanitize=address,undefined)
     endif()
 elseif(MSVC)
-    set(MIRAGE_CXX_FLAGS /W4 /WX)
+    set(MIRAGE_CXX_FLAGS
+        /W4 /WX /permissive-
+        /wd4244 /wd4267 /wd4305 /wd4334 /wd4834
+    )
+endif()
+
+if(WIN32)
+    add_compile_definitions(WIN32_LEAN_AND_MEAN NOMINMAX)
 endif()
 
 find_package(OpenSSL REQUIRED)
