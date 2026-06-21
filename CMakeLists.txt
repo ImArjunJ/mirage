@@ -98,6 +98,7 @@ add_executable(mirage
     src/main.cpp
     src/core/error.cpp
     src/core/config.cpp
+    src/core/receiver_adapter.cpp
     src/crypto/fairplay_pairing.cpp
     src/crypto/fairplay_sap.cpp
     src/crypto/srp6a.cpp
@@ -179,6 +180,15 @@ if(BUILD_TESTING)
     target_compile_options(mirage_airplay_protocol_test PRIVATE ${MIRAGE_CXX_FLAGS})
     target_link_options(mirage_airplay_protocol_test PRIVATE ${MIRAGE_LINK_FLAGS})
     add_test(NAME airplay_protocol COMMAND mirage_airplay_protocol_test)
+
+    add_executable(mirage_receiver_adapter_test
+        tests/test_receiver_adapter.cpp
+        src/core/receiver_adapter.cpp
+    )
+    target_include_directories(mirage_receiver_adapter_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_options(mirage_receiver_adapter_test PRIVATE ${MIRAGE_CXX_FLAGS})
+    target_link_options(mirage_receiver_adapter_test PRIVATE ${MIRAGE_LINK_FLAGS})
+    add_test(NAME receiver_adapter COMMAND mirage_receiver_adapter_test)
 
     if(UNIX)
         add_test(NAME raop_smoke
