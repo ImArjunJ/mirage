@@ -49,13 +49,13 @@ jobs:
         run: |
           export CXXFLAGS="-stdlib=libc++"
           export LDFLAGS="-stdlib=libc++ -lc++abi"
-          cmake -B build -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 -DCMAKE_BUILD_TYPE=Release
-          cmake --build build -j$(nproc)
+          cmake -B build -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build build --target mirage -j$(nproc)
       - name: build (windows)
         if: runner.os == 'Windows'
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
-          cmake --build build --config Release -j $env:NUMBER_OF_PROCESSORS
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          cmake --build build --config Release --target mirage --parallel $env:NUMBER_OF_PROCESSORS
       - name: verify (linux)
         if: runner.os == 'Linux'
         run: ./build/mirage --version
