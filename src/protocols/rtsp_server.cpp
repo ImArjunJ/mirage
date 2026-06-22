@@ -19,6 +19,7 @@
 #include "io/io.hpp"
 #include "media/media.hpp"
 #include "media/pipeline.hpp"
+#include "protocols/airplay/media_source.hpp"
 #include "protocols/airplay_protocol.hpp"
 #include "protocols/protocols.hpp"
 namespace mirage::protocols {
@@ -473,16 +474,6 @@ static std::optional<uint64_t> get_uint(std::span<const std::byte> data, std::st
     return std::nullopt;
 }
 }  // namespace bplist
-static bool looks_like_aac_eld(uint8_t first_byte) {
-    return first_byte == 0x8c || first_byte == 0x8d || first_byte == 0x8e || first_byte == 0x80 ||
-           first_byte == 0x81 || first_byte == 0x82;
-}
-static bool looks_like_alac(uint8_t first_byte) {
-    return first_byte == 0x20;
-}
-static std::string_view audio_codec_label(uint8_t ct) {
-    return ct == 2 ? "ALAC" : "AAC-ELD";
-}
 static std::optional<std::string_view> header_value(const rtsp_request& req,
                                                     std::string_view name) {
     for (const auto& [key, value] : req.headers) {
@@ -541,26 +532,15 @@ static std::vector<int> parse_sdp_ints(std::string_view text) {
 rtsp_session::rtsp_session(io::tcp_stream socket, crypto::fairplay_pairing pairing)
     : socket_(std::move(socket)),
       pairing_(std::move(pairing)),
-      media_sink_(media::make_local_media_sink()) {}
+      media_sink_(media::make_local_media_sink()),
+      airplay_media_(*media_sink_) {}
 auto rtsp_session::create(io::tcp_stream socket, crypto::fairplay_pairing pairing)
     -> std::shared_ptr<rtsp_session> {
     return std::shared_ptr<rtsp_session>(new rtsp_session(std::move(socket), std::move(pairing)));
 }
 void rtsp_session::reset_audio_packet_state() {
-    audio_sequence_started_ = false;
-    next_audio_seqnum_ = 0;
-    audio_pending_packets_.clear();
-    audio_packet_count_ = 0;
-    audio_silent_marker_count_ = 0;
-    audio_invalid_payload_count_ = 0;
-    audio_gap_count_ = 0;
-    audio_duplicate_packet_count_ = 0;
-    audio_stale_packet_count_ = 0;
-    audio_resend_request_count_ = 0;
-    audio_resend_seqnum_ = 0;
-    audio_resend_pending_ = false;
-    audio_resend_pending_start_ = 0;
-    audio_resend_pending_count_ = 0;
+    audio_resend_control_seqnum_ = 0;
+    airplay_media_.reset_audio_packets();
 }
 void rtsp_session::close_audio_stream() {
     if (audio_data_socket_) {
@@ -576,7 +556,7 @@ void rtsp_session::close_video_stream() {
     if (mirror_acceptor_) {
         mirror_acceptor_->close();
     }
-    media_sink_->on_video_teardown();
+    airplay_media_.stop_video();
     mirror_receiver_started_ = false;
 }
 void rtsp_session::close_stream_sockets() {
@@ -1197,62 +1177,13 @@ result<rtsp_response> rtsp_session::handle_announce(const rtsp_request& req) {
         .body = {},
     };
 }
-media::audio_stream_config rtsp_session::current_audio_config() const {
-    media::audio_stream_config config{
-        .codec = audio_ct_ == 2 ? audio_codec::alac : audio_codec::aac,
+bool rtsp_session::configure_audio_decoder() {
+    auto configured = airplay_media_.configure_audio({
+        .codec_tag = audio_ct_,
         .sample_rate = audio_sample_rate_,
         .channels = audio_channels_,
         .frames_per_packet = audio_spf_,
-        .codec_tag = audio_ct_,
-        .codec_config = {},
-    };
-
-    if (audio_ct_ == 2) {
-        uint32_t alac_spf = static_cast<uint32_t>(audio_spf_);
-        uint32_t alac_sr = static_cast<uint32_t>(audio_sample_rate_);
-        config.codec_config.resize(36);
-        config.codec_config[0] = std::byte{0x00};
-        config.codec_config[1] = std::byte{0x00};
-        config.codec_config[2] = std::byte{0x00};
-        config.codec_config[3] = std::byte{0x24};
-        config.codec_config[4] = std::byte{'a'};
-        config.codec_config[5] = std::byte{'l'};
-        config.codec_config[6] = std::byte{'a'};
-        config.codec_config[7] = std::byte{'c'};
-        config.codec_config[8] = std::byte{0x00};
-        config.codec_config[9] = std::byte{0x00};
-        config.codec_config[10] = std::byte{0x00};
-        config.codec_config[11] = std::byte{0x00};
-        config.codec_config[12] = std::byte{static_cast<uint8_t>((alac_spf >> 24) & 0xFF)};
-        config.codec_config[13] = std::byte{static_cast<uint8_t>((alac_spf >> 16) & 0xFF)};
-        config.codec_config[14] = std::byte{static_cast<uint8_t>((alac_spf >> 8) & 0xFF)};
-        config.codec_config[15] = std::byte{static_cast<uint8_t>(alac_spf & 0xFF)};
-        config.codec_config[16] = std::byte{0x00};
-        config.codec_config[17] = std::byte{0x10};
-        config.codec_config[18] = std::byte{0x28};
-        config.codec_config[19] = std::byte{0x0A};
-        config.codec_config[20] = std::byte{0x0E};
-        config.codec_config[21] = std::byte{0x02};
-        config.codec_config[22] = std::byte{0x00};
-        config.codec_config[23] = std::byte{0xFF};
-        config.codec_config[24] = std::byte{0x00};
-        config.codec_config[25] = std::byte{0x00};
-        config.codec_config[26] = std::byte{0x00};
-        config.codec_config[27] = std::byte{0x00};
-        config.codec_config[28] = std::byte{0x00};
-        config.codec_config[29] = std::byte{0x00};
-        config.codec_config[30] = std::byte{0x00};
-        config.codec_config[31] = std::byte{0x00};
-        config.codec_config[32] = std::byte{static_cast<uint8_t>((alac_sr >> 24) & 0xFF)};
-        config.codec_config[33] = std::byte{static_cast<uint8_t>((alac_sr >> 16) & 0xFF)};
-        config.codec_config[34] = std::byte{static_cast<uint8_t>((alac_sr >> 8) & 0xFF)};
-        config.codec_config[35] = std::byte{static_cast<uint8_t>(alac_sr & 0xFF)};
-    }
-    return config;
-}
-
-bool rtsp_session::configure_audio_decoder() {
-    auto configured = media_sink_->on_audio_setup(current_audio_config());
+    });
     if (!configured) {
         mirage::log::error("Audio setup failed: {}", configured.error().message);
         return false;
@@ -1360,7 +1291,7 @@ io::task<result<rtsp_response>> rtsp_session::handle_setup(const rtsp_request& r
         mirage::log::diagnostic(
             "RAOP audio setup: codec={}, sample_rate={}, channels={}, spf={}, data_port={}, "
             "control_port={}, timing_port={}",
-            audio_codec_label(audio_ct_), audio_sample_rate_, audio_channels_, audio_spf_,
+            airplay::audio_codec_label(audio_ct_), audio_sample_rate_, audio_channels_, audio_spf_,
             audio_port, audio_control_port, timing_port);
         co_return rtsp_response{
             .status_code = 200,
@@ -1469,8 +1400,8 @@ io::task<result<rtsp_response>> rtsp_session::handle_setup(const rtsp_request& r
             mirage::log::diagnostic(
                 "Audio stream setup: codec={}, sample_rate={}, channels={}, spf={}, data_port={}, "
                 "control_port={}",
-                audio_codec_label(audio_ct_), audio_sample_rate_, audio_channels_, audio_spf_,
-                audio_port, audio_control_port);
+                airplay::audio_codec_label(audio_ct_), audio_sample_rate_, audio_channels_,
+                audio_spf_, audio_port, audio_control_port);
             if (!configure_audio_decoder()) {
                 mirage::log::error("Failed to create audio decoder for SETUP type 96");
             }
@@ -1499,8 +1430,10 @@ io::task<result<rtsp_response>> rtsp_session::handle_setup(const rtsp_request& r
             if (static_cast<uint8_t>(req.body[i]) == 0x4F &&
                 static_cast<uint8_t>(req.body[i + 1]) == 0x10 &&
                 static_cast<uint8_t>(req.body[i + 2]) == 0x10 && i + 3 + 16 <= req.body.size()) {
+                std::array<std::byte, 16> audio_iv{};
                 std::copy_n(req.body.begin() + static_cast<std::ptrdiff_t>(i + 3), 16,
-                            audio_aes_iv_.begin());
+                            audio_iv.begin());
+                airplay_media_.set_audio_iv(audio_iv);
                 mirage::log::info("Extracted 16-byte eiv for audio decryption");
                 break;
             }
@@ -1520,21 +1453,13 @@ io::task<result<rtsp_response>> rtsp_session::handle_setup(const rtsp_request& r
                 break;
             }
         }
-        if (!audio_keys_ready_ && fp_keymsg_.size() == 164 && fp_ekey_.size() == 72) {
-            std::array<std::byte, 164> keymsg_arr{};
-            std::array<std::byte, 72> ekey_arr{};
-            std::copy(fp_keymsg_.begin(), fp_keymsg_.end(), keymsg_arr.begin());
-            std::copy(fp_ekey_.begin(), fp_ekey_.end(), ekey_arr.begin());
-            auto aeskey = crypto::fairplay_decrypt_key(keymsg_arr, ekey_arr);
-            auto shared_secret = pairing_.transient_shared_secret();
-            std::array<std::byte, 48> combined{};
-            std::copy_n(aeskey.begin(), 16, combined.begin());
-            std::copy_n(shared_secret.begin(), 32, combined.begin() + 16);
-            auto hashed_key = crypto::sha512(combined);
-            std::copy_n(hashed_key.begin(), 16, aeskey.begin());
-            audio_aes_key_ = aeskey;
-            audio_keys_ready_ = true;
-            mirage::log::info("Audio AES-CBC key derived (with ECDH hashing)");
+        if (!airplay_media_.audio_keys_ready() && fp_keymsg_.size() == 164 &&
+            fp_ekey_.size() == 72) {
+            auto derived = airplay_media_.derive_audio_key(fp_keymsg_, fp_ekey_,
+                                                           pairing_.transient_shared_secret());
+            if (!derived) {
+                mirage::log::warn("Audio key derivation failed: {}", derived.error().message);
+            }
         }
         res_root->dict_val.emplace_back("eventPort", bplist::plist_value::make_uint(0));
         res_root->dict_val.emplace_back("timingPort", bplist::plist_value::make_uint(timing_port));
@@ -1656,73 +1581,26 @@ io::task<void> rtsp_session::run_mirror_receiver() {
             mirage::log::info("Mirror connection accepted from {}:{}",
                               mirror_socket.remote_endpoint().addr.to_string(),
                               mirror_socket.remote_endpoint().port);
-            std::vector<std::byte> sps_pps_data;
-            bool is_h265 = false;
-            uint64_t frame_count = 0;
-            uint64_t keyframe_count = 0;
-            bool sps_pps_sent = false;
-            auto video_setup = media_sink_->on_video_setup({
-                .codec = video_codec::h264,
-                .width = 1280,
-                .height = 720,
-                .prefer_hardware = true,
-                .title = "Mirage - AirPlay",
+            auto video_setup = airplay_media_.start_video({
+                .sink_config =
+                    {
+                        .codec = video_codec::h264,
+                        .width = 1280,
+                        .height = 720,
+                        .prefer_hardware = true,
+                        .title = "Mirage - AirPlay",
+                    },
+                .stream_connection_id = stream_connection_id_,
+                .keymsg = fp_keymsg_,
+                .ekey = fp_ekey_,
+                .shared_secret = pairing_.transient_shared_secret(),
             });
             if (!video_setup) {
                 mirage::log::warn("Video setup failed: {}", video_setup.error().message);
             }
-            std::optional<crypto::aes_ctr_decryptor> video_decryptor;
-            if (stream_connection_id_ != 0) {
-                if (fp_keymsg_.size() == 164 && fp_ekey_.size() == 72) {
-                    mirage::log::debug(
-                        "FairPlay key material present: keymsg={} bytes, ekey={} bytes",
-                        fp_keymsg_.size(), fp_ekey_.size());
-                    std::array<std::byte, 164> keymsg_arr;
-                    std::array<std::byte, 72> ekey_arr;
-                    std::copy(fp_keymsg_.begin(), fp_keymsg_.end(), keymsg_arr.begin());
-                    std::copy(fp_ekey_.begin(), fp_ekey_.end(), ekey_arr.begin());
-                    auto aeskey = crypto::fairplay_decrypt_key(keymsg_arr, ekey_arr);
-                    auto shared_secret = pairing_.transient_shared_secret();
-                    std::array<std::byte, 48> combined;
-                    std::copy_n(aeskey.begin(), 16, combined.begin());
-                    std::copy_n(shared_secret.begin(), 32, combined.begin() + 16);
-                    auto hashed_key = crypto::sha512(combined);
-                    std::copy_n(hashed_key.begin(), 16, aeskey.begin());
-                    auto key_hash =
-                        crypto::sha512_concat("AirPlayStreamKey", stream_connection_id_, aeskey);
-                    auto iv_hash =
-                        crypto::sha512_concat("AirPlayStreamIV", stream_connection_id_, aeskey);
-                    std::array<std::byte, 16> video_key;
-                    std::array<std::byte, 16> video_iv;
-                    std::copy_n(key_hash.begin(), 16, video_key.begin());
-                    std::copy_n(iv_hash.begin(), 16, video_iv.begin());
-                    mirage::log::debug(
-                        "Derived video decryption material for streamConnectionID={}",
-                        stream_connection_id_);
-                    auto decryptor = crypto::aes_ctr_decryptor::create(video_key, video_iv);
-                    if (decryptor) {
-                        video_decryptor = std::move(*decryptor);
-                        mirage::log::info("Video decryption initialized for streamConnectionID={}",
-                                          stream_connection_id_);
-                    } else {
-                        mirage::log::warn("Failed to initialize video decryption: {}",
-                                          decryptor.error().message);
-                    }
-                    audio_aes_key_ = aeskey;
-                    audio_keys_ready_ = true;
-                    mirage::log::info("Audio AES-CBC key ready");
-                } else {
-                    mirage::log::warn(
-                        "Cannot initialize video decryption: keymsg={} bytes, ekey={} bytes",
-                        fp_keymsg_.size(), fp_ekey_.size());
-                }
-            } else {
-                mirage::log::warn("Cannot initialize video decryption: streamID={}",
-                                  stream_connection_id_);
-            }
             std::array<std::byte, 128> header;
             while (mirror_socket.is_open() && state_ != rtsp_session_state::teardown &&
-                   media_sink_->video_open()) {
+                   airplay_media_.video_open()) {
                 try {
                     co_await mirror_socket.async_read_exactly(std::span<std::byte>(header));
                 } catch (const std::system_error& e) {
@@ -1743,9 +1621,6 @@ io::task<void> rtsp_session::run_mirror_receiver() {
                 uint8_t payload_flag = static_cast<uint8_t>(header[5]);
                 uint8_t option0 = static_cast<uint8_t>(header[6]);
                 (void)header[7];
-                if (option0 == 0x1e || option0 == 0x5e) {
-                    is_h265 = true;
-                }
                 std::vector<std::byte> payload(payload_size);
                 try {
                     co_await mirror_socket.async_read_exactly(
@@ -1760,189 +1635,25 @@ io::task<void> rtsp_session::run_mirror_receiver() {
                 } catch (...) {
                     break;
                 }
-                switch (payload_type) {
-                    case 0x00: {
-                        bool is_keyframe = (payload_flag == 0x10);
-                        frame_count++;
-                        if (is_keyframe) {
-                            keyframe_count++;
-                        }
-                        if (frame_count % 60 == 1) {
-                            mirage::log::info(
-                                "Video: {} frames ({} keyframes), {} codec, payload {} bytes{}",
-                                frame_count, keyframe_count, is_h265 ? "H.265" : "H.264",
-                                payload_size, is_keyframe ? " [KEYFRAME]" : "");
-                        }
-                        if (video_decryptor && payload_size > 0) {
-                            if (frame_count <= 3) {
-                                mirage::log::trace("Frame {} decrypting {} bytes", frame_count,
-                                                   payload_size);
-                            }
-                            std::vector<std::byte> decrypted(payload_size);
-                            auto result = video_decryptor->decrypt(payload, decrypted);
-                            if (result) {
-                                if (frame_count <= 3) {
-                                    mirage::log::trace("Frame {} decrypted {} bytes", frame_count,
-                                                       payload_size);
-                                }
-                                size_t offset = 0;
-                                int nal_count = 0;
-                                bool valid = true;
-                                while (offset + 4 < decrypted.size() && valid) {
-                                    uint32_t nal_len =
-                                        (static_cast<uint32_t>(decrypted[offset]) << 24) |
-                                        (static_cast<uint32_t>(decrypted[offset + 1]) << 16) |
-                                        (static_cast<uint32_t>(decrypted[offset + 2]) << 8) |
-                                        static_cast<uint32_t>(decrypted[offset + 3]);
-                                    if (nal_len == 0 || offset + 4 + nal_len > decrypted.size()) {
-                                        valid = false;
-                                        break;
-                                    }
-                                    uint8_t nal_header =
-                                        static_cast<uint8_t>(decrypted[offset + 4]);
-                                    if (nal_header & 0x80) {
-                                        valid = false;
-                                        break;
-                                    }
-                                    (void)(is_h265 ? ((nal_header >> 1) & 0x3F)
-                                                   : (nal_header & 0x1F));
-                                    nal_count++;
-                                    offset += 4 + nal_len;
-                                }
-                                if (frame_count <= 5 || (frame_count % 300 == 1)) {
-                                    if (valid && offset == decrypted.size()) {
-                                        mirage::log::info(
-                                            "Frame {} decrypted successfully: {} NAL unit(s)",
-                                            frame_count, nal_count);
-                                    } else {
-                                        mirage::log::warn(
-                                            "Frame {} decryption check failed at offset {}/{}",
-                                            frame_count, offset, decrypted.size());
-                                    }
-                                }
-                                if (media_sink_->video_open()) {
-                                    std::vector<std::byte> annex_b;
-                                    constexpr std::array<std::byte, 4> start_code{
-                                        std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
-                                        std::byte{0x01}};
-                                    if (is_keyframe && !sps_pps_sent && !sps_pps_data.empty()) {
-                                        annex_b.insert(annex_b.end(), sps_pps_data.begin(),
-                                                       sps_pps_data.end());
-                                        sps_pps_sent = true;
-                                        mirage::log::info(
-                                            "Prepended SPS/PPS ({} bytes) to keyframe",
-                                            sps_pps_data.size());
-                                    }
-                                    size_t nal_offset = 0;
-                                    while (nal_offset + 4 < decrypted.size()) {
-                                        uint32_t nal_len =
-                                            (static_cast<uint32_t>(decrypted[nal_offset]) << 24) |
-                                            (static_cast<uint32_t>(decrypted[nal_offset + 1])
-                                             << 16) |
-                                            (static_cast<uint32_t>(decrypted[nal_offset + 2])
-                                             << 8) |
-                                            static_cast<uint32_t>(decrypted[nal_offset + 3]);
-                                        if (nal_len == 0 ||
-                                            nal_offset + 4 + nal_len > decrypted.size()) {
-                                            break;
-                                        }
-                                        annex_b.insert(annex_b.end(), start_code.begin(),
-                                                       start_code.end());
-                                        annex_b.insert(
-                                            annex_b.end(),
-                                            decrypted.begin() +
-                                                static_cast<std::ptrdiff_t>(nal_offset + 4),
-                                            decrypted.begin() + static_cast<std::ptrdiff_t>(
-                                                                    nal_offset + 4 + nal_len));
-                                        nal_offset += 4 + nal_len;
-                                    }
-                                    media::media_packet packet{
-                                        .stream = media::media_stream_type::video,
-                                        .payload = std::move(annex_b),
-                                        .sequence = frame_count,
-                                        .timestamp = 0,
-                                        .keyframe = is_keyframe,
-                                        .retransmitted = false,
-                                    };
-                                    auto decode_result = media_sink_->on_video_packet(packet);
-                                    if (!decode_result) {
-                                        if (frame_count % 60 == 1) {
-                                            mirage::log::debug("Decode: {}",
-                                                               decode_result.error().message);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        break;
-                    }
-                    case 0x01: {
-                        if (payload_size < 11) {
-                            mirage::log::warn("SPS/PPS packet too small: {} bytes", payload_size);
-                            break;
-                        }
-                        auto sps_size =
-                            static_cast<size_t>((static_cast<uint16_t>(payload[6]) << 8) |
-                                                static_cast<uint16_t>(payload[7]));
-                        if (8 + sps_size + 3 > payload_size) {
-                            mirage::log::warn("SPS/PPS: invalid sps_size {} for payload {}",
-                                              sps_size, payload_size);
-                            break;
-                        }
-                        auto pps_size = static_cast<size_t>(
-                            (static_cast<uint16_t>(payload[8 + sps_size + 1]) << 8) |
-                            static_cast<uint16_t>(payload[8 + sps_size + 2]));
-                        if (8 + sps_size + 3 + pps_size > payload_size) {
-                            mirage::log::warn("SPS/PPS: invalid pps_size {} for payload {}",
-                                              pps_size, payload_size);
-                            break;
-                        }
-                        mirage::log::info("Received SPS ({} bytes) + PPS ({} bytes), {} codec",
-                                          sps_size, pps_size, is_h265 ? "H.265" : "H.264");
-                        constexpr std::array<std::byte, 4> start_code{
-                            std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x01}};
-                        sps_pps_data.clear();
-                        sps_pps_data.reserve(sps_size + pps_size + 8);
-                        sps_pps_data.insert(sps_pps_data.end(), start_code.begin(),
-                                            start_code.end());
-                        sps_pps_data.insert(
-                            sps_pps_data.end(), payload.begin() + 8,
-                            payload.begin() + static_cast<std::ptrdiff_t>(8 + sps_size));
-                        sps_pps_data.insert(sps_pps_data.end(), start_code.begin(),
-                                            start_code.end());
-                        sps_pps_data.insert(
-                            sps_pps_data.end(),
-                            payload.begin() + static_cast<std::ptrdiff_t>(8 + sps_size + 3),
-                            payload.begin() +
-                                static_cast<std::ptrdiff_t>(8 + sps_size + 3 + pps_size));
-                        sps_pps_sent = false;
-                        mirage::log::debug("Parsed SPS/PPS Annex-B: {} bytes", sps_pps_data.size());
-                        break;
-                    }
-                    case 0x02: {
-                        mirage::log::trace("Mirror heartbeat packet");
-                        break;
-                    }
-                    case 0x05: {
-                        mirage::log::trace("Streaming report ({} bytes)", payload_size);
-                        break;
-                    }
-                    default:
-                        mirage::log::debug("Unknown mirror packet type 0x{:02x} 0x{:02x}, {} bytes",
-                                           payload_type, payload_flag, payload_size);
-                        break;
+                auto handled = airplay_media_.receive_mirror_payload(
+                    payload_type, payload_flag, option0,
+                    std::span<const std::byte>(payload.data(), payload.size()));
+                if (!handled && payload_type == 0x00) {
+                    mirage::log::debug("Mirror frame processing failed: {}",
+                                       handled.error().message);
                 }
             }
+            auto stats = airplay_media_.video_stats();
             const char* video_health =
-                (frame_count > 0 && keyframe_count > 0) ? "clean" : "attention";
+                (stats.frames > 0 && stats.keyframes > 0) ? "clean" : "attention";
             mirage::log::diagnostic("Video stream summary: health={}, frames={}, keyframes={}",
-                                    video_health, frame_count, keyframe_count);
-            if (!media_sink_->video_open()) {
+                                    video_health, stats.frames, stats.keyframes);
+            if (!airplay_media_.video_open()) {
                 mirage::log::info("Window closed, tearing down session");
                 state_ = rtsp_session_state::teardown;
                 socket_.close();
             }
-            media_sink_->on_video_teardown();
+            airplay_media_.stop_video();
         }
     } catch (const std::system_error& e) {
         if (mirror_receiver_started_ && state_ != rtsp_session_state::teardown &&
@@ -1952,182 +1663,6 @@ io::task<void> rtsp_session::run_mirror_receiver() {
     }
     mirror_receiver_started_ = false;
     mirage::log::debug("Mirror receiver stopped");
-}
-void rtsp_session::process_audio_packet(std::span<const std::byte> rtp_packet, size_t len) {
-    if (len <= media::rtp_header::size) {
-        return;
-    }
-
-    auto payload_start = rtp_packet.data() + media::rtp_header::size;
-    auto payload_len = len - media::rtp_header::size;
-
-    if (payload_len == 0) {
-        ++audio_silent_marker_count_;
-        return;
-    }
-
-    constexpr std::array<std::byte, 4> no_data_marker{std::byte{0x00}, std::byte{0x68},
-                                                      std::byte{0x34}, std::byte{0x00}};
-    if (payload_len == 4 && std::equal(payload_start, payload_start + 4, no_data_marker.begin())) {
-        ++audio_silent_marker_count_;
-        return;
-    }
-
-    if (audio_ct_ == 2 && payload_len == 44) {
-        ++audio_silent_marker_count_;
-        return;
-    }
-
-    std::vector<std::byte> decrypted(payload_len);
-    if (audio_keys_ready_ && payload_len > 0) {
-        auto encrypted_len = (payload_len / 16) * 16;
-        if (encrypted_len > 0) {
-            crypto::aes_cbc_decrypt(audio_aes_key_, audio_aes_iv_,
-                                    std::span<const std::byte>(payload_start, encrypted_len),
-                                    std::span<std::byte>(decrypted.data(), encrypted_len));
-        }
-        if (payload_len > encrypted_len) {
-            std::copy_n(payload_start + encrypted_len, payload_len - encrypted_len,
-                        decrypted.data() + encrypted_len);
-        }
-    } else {
-        std::copy_n(payload_start, payload_len, decrypted.data());
-    }
-
-    auto first_payload_byte = static_cast<uint8_t>(decrypted[0]);
-    if (audio_ct_ == 2 && !looks_like_alac(first_payload_byte)) {
-        if (looks_like_aac_eld(first_payload_byte)) {
-            mirage::log::warn(
-                "Audio payload looks like AAC-ELD while configured as ALAC; switching");
-            audio_ct_ = 8;
-            audio_spf_ = 480;
-            if (!configure_audio_decoder()) {
-                mirage::log::error("Failed to switch audio decoder to AAC-ELD");
-                return;
-            }
-        } else {
-            ++audio_invalid_payload_count_;
-            if (audio_invalid_payload_count_ <= 5 || audio_invalid_payload_count_ % 500 == 0) {
-                mirage::log::warn("Skipping invalid ALAC payload: first byte=0x{:02x}, len={}",
-                                  first_payload_byte, decrypted.size());
-            }
-            return;
-        }
-    } else if (audio_ct_ == 8 && !looks_like_aac_eld(first_payload_byte)) {
-        ++audio_invalid_payload_count_;
-        if (audio_invalid_payload_count_ <= 5 || audio_invalid_payload_count_ % 500 == 0) {
-            if (looks_like_alac(first_payload_byte)) {
-                mirage::log::warn(
-                    "Audio payload looks like ALAC while configured as AAC-ELD; skipping");
-            } else {
-                mirage::log::warn("Skipping invalid AAC-ELD payload: first byte=0x{:02x}, len={}",
-                                  first_payload_byte, decrypted.size());
-            }
-        }
-        return;
-    }
-
-    uint16_t sequence =
-        static_cast<uint16_t>((static_cast<uint16_t>(static_cast<uint8_t>(rtp_packet[2])) << 8) |
-                              static_cast<uint16_t>(static_cast<uint8_t>(rtp_packet[3])));
-    uint32_t timestamp = (static_cast<uint32_t>(static_cast<uint8_t>(rtp_packet[4])) << 24) |
-                         (static_cast<uint32_t>(static_cast<uint8_t>(rtp_packet[5])) << 16) |
-                         (static_cast<uint32_t>(static_cast<uint8_t>(rtp_packet[6])) << 8) |
-                         static_cast<uint32_t>(static_cast<uint8_t>(rtp_packet[7]));
-    media::media_packet packet{
-        .stream = media::media_stream_type::audio,
-        .payload = std::move(decrypted),
-        .sequence = sequence,
-        .timestamp = timestamp,
-        .keyframe = false,
-        .retransmitted = false,
-    };
-    if (auto delivered = media_sink_->on_audio_packet(packet); !delivered) {
-        ++audio_invalid_payload_count_;
-        if (audio_invalid_payload_count_ <= 5 || audio_invalid_payload_count_ % 500 == 0) {
-            mirage::log::warn("Audio packet delivery failed: {}", delivered.error().message);
-        }
-        return;
-    }
-
-    ++audio_packet_count_;
-    if (audio_packet_count_ == 1 || audio_packet_count_ % 500 == 0) {
-        mirage::log::info("Audio: {} packets decoded", audio_packet_count_);
-    }
-}
-bool rtsp_session::queue_audio_packet(std::span<const std::byte> rtp_packet, uint16_t seqnum,
-                                      bool retransmitted) {
-    if (!audio_sequence_started_) {
-        audio_sequence_started_ = true;
-        next_audio_seqnum_ = seqnum;
-    }
-
-    int delta = airplay::audio_seq_delta(seqnum, next_audio_seqnum_);
-    if (delta < 0) {
-        ++audio_stale_packet_count_;
-        if (audio_stale_packet_count_ <= 5 || audio_stale_packet_count_ % 1000 == 0) {
-            mirage::log::trace("Dropping stale/redundant audio packet seq={} next={}", seqnum,
-                               next_audio_seqnum_);
-        }
-        return false;
-    }
-
-    auto duplicate =
-        std::ranges::find(audio_pending_packets_, seqnum, &buffered_audio_packet::seqnum);
-    if (duplicate != audio_pending_packets_.end()) {
-        ++audio_duplicate_packet_count_;
-        if (audio_duplicate_packet_count_ <= 5 || audio_duplicate_packet_count_ % 500 == 0) {
-            mirage::log::trace("Dropping duplicate audio packet seq={}", seqnum);
-        }
-        return false;
-    }
-
-    audio_pending_packets_.push_back(buffered_audio_packet{
-        .seqnum = seqnum,
-        .packet = std::vector<std::byte>(rtp_packet.begin(), rtp_packet.end()),
-        .retransmitted = retransmitted,
-    });
-
-    if (audio_pending_packets_.size() > airplay::max_pending_audio_packets) {
-        auto next_it = std::ranges::min_element(
-            audio_pending_packets_, [this](const auto& lhs, const auto& rhs) {
-                return airplay::audio_seq_delta(lhs.seqnum, next_audio_seqnum_) <
-                       airplay::audio_seq_delta(rhs.seqnum, next_audio_seqnum_);
-            });
-        if (next_it != audio_pending_packets_.end()) {
-            int skipped = airplay::audio_seq_delta(next_it->seqnum, next_audio_seqnum_);
-            if (skipped > 0) {
-                mirage::log::warn("Skipping {} missing audio packet(s) after resend window expired",
-                                  skipped);
-                next_audio_seqnum_ = next_it->seqnum;
-            }
-        }
-    }
-
-    return true;
-}
-void rtsp_session::drain_audio_packets() {
-    while (audio_sequence_started_) {
-        auto it = std::ranges::find(audio_pending_packets_, next_audio_seqnum_,
-                                    &buffered_audio_packet::seqnum);
-        if (it == audio_pending_packets_.end()) {
-            return;
-        }
-
-        auto packet = std::move(it->packet);
-        auto retransmitted = it->retransmitted;
-        audio_pending_packets_.erase(it);
-        if (retransmitted) {
-            mirage::log::trace("Recovered audio packet seq={}", next_audio_seqnum_);
-        }
-        process_audio_packet(std::span<const std::byte>(packet.data(), packet.size()),
-                             packet.size());
-        next_audio_seqnum_ = static_cast<uint16_t>(next_audio_seqnum_ + 1);
-        if (audio_resend_pending_ &&
-            airplay::audio_seq_delta(next_audio_seqnum_, audio_resend_pending_start_) > 0) {
-            audio_resend_pending_ = false;
-        }
-    }
 }
 io::task<void> rtsp_session::send_audio_resend_request(uint16_t start_seqnum, uint16_t count) {
     if (count == 0 || !audio_control_socket_ || !audio_control_socket_->is_open() ||
@@ -2139,17 +1674,13 @@ io::task<void> rtsp_session::send_audio_resend_request(uint16_t start_seqnum, ui
     std::array<std::byte, 8> resend_req{};
     resend_req[0] = std::byte{0x80};
     resend_req[1] = std::byte{0xD5};
-    resend_req[2] = std::byte{static_cast<uint8_t>((audio_resend_seqnum_ >> 8) & 0xFF)};
-    resend_req[3] = std::byte{static_cast<uint8_t>(audio_resend_seqnum_ & 0xFF)};
+    resend_req[2] = std::byte{static_cast<uint8_t>((audio_resend_control_seqnum_ >> 8) & 0xFF)};
+    resend_req[3] = std::byte{static_cast<uint8_t>(audio_resend_control_seqnum_ & 0xFF)};
     resend_req[4] = std::byte{static_cast<uint8_t>((start_seqnum >> 8) & 0xFF)};
     resend_req[5] = std::byte{static_cast<uint8_t>(start_seqnum & 0xFF)};
     resend_req[6] = std::byte{static_cast<uint8_t>((count >> 8) & 0xFF)};
     resend_req[7] = std::byte{static_cast<uint8_t>(count & 0xFF)};
-    ++audio_resend_seqnum_;
-    ++audio_resend_request_count_;
-    audio_resend_pending_ = true;
-    audio_resend_pending_start_ = start_seqnum;
-    audio_resend_pending_count_ = count;
+    ++audio_resend_control_seqnum_;
 
     try {
         co_await audio_control_socket_->async_send_to(std::span<const std::byte>(resend_req),
@@ -2181,29 +1712,11 @@ io::task<void> rtsp_session::run_audio_receiver() {
                 continue;
             }
 
-            auto seqnum =
-                static_cast<uint16_t>((static_cast<uint16_t>(static_cast<uint8_t>(buf[2])) << 8) |
-                                      static_cast<uint16_t>(static_cast<uint8_t>(buf[3])));
-
-            if (audio_sequence_started_) {
-                int gap = airplay::audio_seq_delta(seqnum, next_audio_seqnum_);
-                if (gap > 0 && gap < 1000) {
-                    ++audio_gap_count_;
-                    mirage::log::debug(
-                        "Audio gap detected: expected seq {}, got {}, missing {} packet(s)",
-                        next_audio_seqnum_, seqnum, gap);
-                    if (!audio_resend_pending_ ||
-                        audio_resend_pending_start_ != next_audio_seqnum_) {
-                        co_await send_audio_resend_request(
-                            next_audio_seqnum_,
-                            static_cast<uint16_t>(std::min(
-                                gap, static_cast<int>(airplay::max_audio_resend_packets))));
-                    }
-                }
-            }
-
-            if (queue_audio_packet(std::span<const std::byte>(buf.data(), n), seqnum, false)) {
-                drain_audio_packets();
+            auto received =
+                airplay_media_.receive_audio_rtp(std::span<const std::byte>(buf.data(), n), false);
+            if (received.resend) {
+                co_await send_audio_resend_request(received.resend->start_seqnum,
+                                                   received.resend->count);
             }
         }
     } catch (const std::system_error& e) {
@@ -2214,16 +1727,17 @@ io::task<void> rtsp_session::run_audio_receiver() {
     }
 
     media_sink_->on_audio_teardown();
-    const char* audio_health = (audio_gap_count_ == 0 && audio_resend_request_count_ == 0 &&
-                                audio_invalid_payload_count_ == 0 && audio_pending_packets_.empty())
-                                   ? "clean"
-                                   : "attention";
+    auto stats = airplay_media_.audio_stats();
+    const char* audio_health =
+        (stats.gaps == 0 && stats.resend_requests == 0 && stats.invalid == 0 && stats.pending == 0)
+            ? "clean"
+            : "attention";
     mirage::log::diagnostic(
         "Audio stream summary: health={}, decoded_packets={}, silent_or_marker={}, gaps={}, "
-        "resend_requests={}, redundant_after_decode={}, duplicates={}, invalid={}, pending={}",
-        audio_health, audio_packet_count_, audio_silent_marker_count_, audio_gap_count_,
-        audio_resend_request_count_, audio_stale_packet_count_, audio_duplicate_packet_count_,
-        audio_invalid_payload_count_, audio_pending_packets_.size());
+        "resend_requests={}, stale_or_redundant={}, duplicates={}, invalid={}, pending={}",
+        audio_health, stats.decoded_packets, stats.silent_or_marker, stats.gaps,
+        stats.resend_requests, stats.stale_or_redundant, stats.duplicates, stats.invalid,
+        stats.pending);
     audio_receiver_started_ = false;
 }
 io::task<void> rtsp_session::run_audio_control_receiver() {
@@ -2254,9 +1768,7 @@ io::task<void> rtsp_session::run_audio_control_receiver() {
                     static_cast<uint16_t>(static_cast<uint8_t>(rtp_data[3])));
                 mirage::log::trace("Audio control: retransmitted packet seq={} ({} bytes)", seqnum,
                                    rtp_data.size());
-                if (queue_audio_packet(rtp_data, seqnum, true)) {
-                    drain_audio_packets();
-                }
+                (void)airplay_media_.receive_audio_rtp(rtp_data, true);
             } else if (ptype == 0x54) {
                 mirage::log::trace("Audio control: sync packet ({} bytes)", n);
             } else {

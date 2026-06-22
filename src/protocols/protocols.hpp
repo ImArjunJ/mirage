@@ -10,6 +10,7 @@
 #include "crypto/crypto.hpp"
 #include "io/io.hpp"
 #include "media/pipeline.hpp"
+#include "protocols/airplay/media_source.hpp"
 #include "protocols/airplay_protocol.hpp"
 namespace mirage::protocols {
 enum class rtsp_session_state : uint8_t {
@@ -65,38 +66,26 @@ private:
     io::task<void> run_mirror_receiver();
     io::task<void> run_audio_receiver();
     io::task<void> run_audio_control_receiver();
-    void process_audio_packet(std::span<const std::byte> rtp_packet, size_t len);
     bool configure_audio_decoder();
-    [[nodiscard]] media::audio_stream_config current_audio_config() const;
-    bool queue_audio_packet(std::span<const std::byte> rtp_packet, uint16_t seqnum,
-                            bool retransmitted);
-    void drain_audio_packets();
     io::task<void> send_audio_resend_request(uint16_t start_seqnum, uint16_t count);
     void reset_audio_packet_state();
     void close_audio_stream();
     void close_video_stream();
     void close_stream_sockets();
     rtsp_session(io::tcp_stream socket, crypto::fairplay_pairing pairing);
-    struct buffered_audio_packet {
-        uint16_t seqnum = 0;
-        std::vector<std::byte> packet;
-        bool retransmitted = false;
-    };
     io::tcp_stream socket_;
     crypto::fairplay_pairing pairing_;
     rtsp_session_state state_ = rtsp_session_state::init;
     uint32_t cseq_ = 0;
     std::vector<std::byte> fp_keymsg_;
     std::vector<std::byte> fp_ekey_;
-    std::array<std::byte, 16> audio_aes_key_{};
-    std::array<std::byte, 16> audio_aes_iv_{};
-    bool audio_keys_ready_ = false;
     std::unique_ptr<io::udp_socket> timing_socket_;
     std::unique_ptr<io::udp_socket> control_socket_;
     std::unique_ptr<io::tcp_acceptor> mirror_acceptor_;
     std::unique_ptr<io::udp_socket> audio_data_socket_;
     std::unique_ptr<io::udp_socket> audio_control_socket_;
     std::unique_ptr<media::media_sink> media_sink_;
+    airplay::media_source airplay_media_;
     io::endpoint client_timing_endpoint_;
     bool base_receivers_started_ = false;
     bool mirror_receiver_started_ = false;
@@ -106,23 +95,10 @@ private:
     int audio_sample_rate_ = airplay::default_sample_rate;
     int audio_channels_ = airplay::default_channels;
     int audio_spf_ = 352;
-    bool audio_sequence_started_ = false;
-    uint16_t next_audio_seqnum_ = 0;
-    uint64_t audio_packet_count_ = 0;
-    uint64_t audio_silent_marker_count_ = 0;
-    uint64_t audio_invalid_payload_count_ = 0;
-    uint64_t audio_gap_count_ = 0;
-    uint64_t audio_duplicate_packet_count_ = 0;
-    uint64_t audio_stale_packet_count_ = 0;
-    uint64_t audio_resend_request_count_ = 0;
-    uint16_t audio_resend_seqnum_ = 0;
-    bool audio_resend_pending_ = false;
-    uint16_t audio_resend_pending_start_ = 0;
-    uint16_t audio_resend_pending_count_ = 0;
     float audio_volume_db_ = 0.0F;
     float audio_linear_volume_ = 1.0F;
+    uint16_t audio_resend_control_seqnum_ = 0;
     io::endpoint audio_control_remote_;
-    std::vector<buffered_audio_packet> audio_pending_packets_;
 };
 class rtsp_server {
 public:

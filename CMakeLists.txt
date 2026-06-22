@@ -116,6 +116,7 @@ add_executable(mirage
     src/protocols/rtsp_server.cpp
     src/protocols/cast_channel.cpp
     src/protocols/wfd_session.cpp
+    src/protocols/airplay/media_source.cpp
     src/protocols/airplay/receiver_session.cpp
     src/protocols/cast/receiver_session.cpp
     src/protocols/wfd/receiver_session.cpp
@@ -210,6 +211,18 @@ if(BUILD_TESTING)
     target_compile_options(mirage_media_pipeline_test PRIVATE ${MIRAGE_CXX_FLAGS})
     target_link_options(mirage_media_pipeline_test PRIVATE ${MIRAGE_LINK_FLAGS})
     add_test(NAME media_pipeline COMMAND mirage_media_pipeline_test)
+
+    add_executable(mirage_airplay_media_source_test
+        tests/test_airplay_media_source.cpp
+        src/protocols/airplay/media_source.cpp
+        src/crypto/aes_ctr.cpp
+        src/crypto/fairplay_sap.cpp
+    )
+    target_include_directories(mirage_airplay_media_source_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_options(mirage_airplay_media_source_test PRIVATE ${MIRAGE_CXX_FLAGS})
+    target_link_options(mirage_airplay_media_source_test PRIVATE ${MIRAGE_LINK_FLAGS})
+    target_link_libraries(mirage_airplay_media_source_test PRIVATE OpenSSL::Crypto)
+    add_test(NAME airplay_media_source COMMAND mirage_airplay_media_source_test)
 
     if(UNIX)
         add_test(NAME raop_smoke
