@@ -11,23 +11,14 @@ namespace {
 
 class wfd_receiver_session final : public receiver_session {
 public:
-    explicit wfd_receiver_session(io::io_context& ctx) : ctx_(ctx) {}
+    wfd_receiver_session(io::io_context& ctx, receiver_source_descriptor source)
+        : ctx_(ctx), source_(source) {}
 
-    [[nodiscard]] protocol id() const override { return protocol::miracast; }
-    [[nodiscard]] uint16_t port() const override { return 0; }
+    [[nodiscard]] protocol id() const override { return source_.id; }
+    [[nodiscard]] uint16_t port() const override { return source_.port; }
 
     [[nodiscard]] receiver_session_capabilities capabilities() const override {
-        return {
-            .network_listener = false,
-            .discovery = false,
-            .pairing = true,
-            .media_setup = true,
-            .audio = true,
-            .video = true,
-            .remote_control = true,
-            .metadata = false,
-            .transport = "wfd",
-        };
+        return source_.capabilities;
     }
 
     result<void> start(receiver_adapter_registry& adapters,
@@ -61,13 +52,15 @@ public:
 
 private:
     io::io_context& ctx_;
+    receiver_source_descriptor source_;
     std::optional<wfd_session> session_;
 };
 
 }  // namespace
 
-std::unique_ptr<receiver_session> make_wfd_receiver_session(io::io_context& ctx) {
-    return std::make_unique<wfd_receiver_session>(ctx);
+std::unique_ptr<receiver_session> make_wfd_receiver_session(io::io_context& ctx,
+                                                            receiver_source_descriptor source) {
+    return std::make_unique<wfd_receiver_session>(ctx, source);
 }
 
 }  // namespace mirage::protocols

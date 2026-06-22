@@ -5,12 +5,14 @@
 #include <vector>
 
 #include "core/core.hpp"
+#include "core/receiver_source.hpp"
 
 namespace mirage {
 
 class receiver_adapter_registry {
 public:
     explicit receiver_adapter_registry(const config& cfg);
+    explicit receiver_adapter_registry(std::span<const receiver_source_descriptor> sources);
 
     [[nodiscard]] std::span<const receiver_adapter_status> all() const;
     [[nodiscard]] receiver_adapter_status* find(protocol id);

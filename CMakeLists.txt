@@ -99,6 +99,7 @@ add_executable(mirage
     src/core/error.cpp
     src/core/config.cpp
     src/core/receiver_adapter.cpp
+    src/core/receiver_source.cpp
     src/crypto/fairplay_pairing.cpp
     src/crypto/fairplay_sap.cpp
     src/crypto/srp6a.cpp
@@ -116,6 +117,7 @@ add_executable(mirage
     src/protocols/rtsp_server.cpp
     src/protocols/cast_channel.cpp
     src/protocols/wfd_session.cpp
+    src/protocols/receiver_sessions.cpp
     src/protocols/airplay/media_source.cpp
     src/protocols/airplay/receiver_session.cpp
     src/protocols/cast/receiver_session.cpp
@@ -189,6 +191,7 @@ if(BUILD_TESTING)
     add_executable(mirage_receiver_adapter_test
         tests/test_receiver_adapter.cpp
         src/core/receiver_adapter.cpp
+        src/core/receiver_source.cpp
     )
     target_include_directories(mirage_receiver_adapter_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_compile_options(mirage_receiver_adapter_test PRIVATE ${MIRAGE_CXX_FLAGS})

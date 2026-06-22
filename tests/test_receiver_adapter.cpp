@@ -1,7 +1,9 @@
 #include <iostream>
 #include <string>
+#include <vector>
 
 #include "core/receiver_adapter.hpp"
+#include "core/receiver_source.hpp"
 
 namespace {
 
@@ -54,6 +56,45 @@ int main() {
     adapters.mark_stopped(mirage::protocol::airplay);
     ok &= expect(airplay->state == mirage::receiver_adapter_state::stopped,
                  "airplay stopped transition mismatch");
+
+    mirage::receiver_source_registry source_registry({
+        mirage::receiver_source_descriptor{
+            .id = mirage::protocol::airplay,
+            .port = 7000,
+            .enabled = true,
+            .experimental = true,
+            .detail = "rtsp/raop receiver",
+            .capabilities = {.network_listener = true, .discovery = true, .transport = "rtsp"},
+        },
+        mirage::receiver_source_descriptor{
+            .id = mirage::protocol::cast,
+            .port = 8009,
+            .enabled = true,
+            .experimental = true,
+            .detail = "cast v2 receiver",
+            .capabilities = {.network_listener = true, .discovery = true, .transport = "cast-v2"},
+        },
+    });
+    mirage::receiver_adapter_registry source_adapters(source_registry.all());
+    const auto* source_airplay = source_adapters.find(mirage::protocol::airplay);
+    const auto* source_cast = source_adapters.find(mirage::protocol::cast);
+
+    ok &= expect(source_registry.enabled().size() == 2, "enabled source count mismatch");
+    ok &= expect(source_registry.find(mirage::protocol::miracast) == nullptr,
+                 "unexpected miracast source");
+    ok &= expect(source_airplay != nullptr, "source airplay adapter missing");
+    ok &= expect(source_cast != nullptr, "source cast adapter missing");
+    if (source_airplay != nullptr) {
+        ok &= expect(source_airplay->state == mirage::receiver_adapter_state::unavailable,
+                     "source airplay initial state mismatch");
+        ok &= expect(source_airplay->detail == std::string("rtsp/raop receiver"),
+                     "source airplay detail mismatch");
+    }
+    if (source_cast != nullptr) {
+        ok &= expect(source_cast->port == 8009, "source cast port mismatch");
+        ok &= expect(source_cast->detail == std::string("cast v2 receiver"),
+                     "source cast detail mismatch");
+    }
 
     return ok ? 0 : 1;
 }

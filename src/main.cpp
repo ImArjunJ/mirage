@@ -826,7 +826,9 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        mirage::receiver_adapter_registry adapters(cfg);
+        auto receiver_sources = mirage::receiver_source_registry(
+            mirage::protocols::make_receiver_source_descriptors(cfg));
+        mirage::receiver_adapter_registry adapters(receiver_sources.all());
 
         std::optional<mirage::discovery::mdns_broadcaster> mdns;
         std::optional<mirage::discovery::mdns_service_publisher> mdns_publisher;
@@ -853,16 +855,17 @@ int main(int argc, char* argv[]) {
             mirage::io::co_spawn(ctx, std::move(task));
         };
 
-        if (cfg.enable_airplay) {
-            start_receiver_session(mirage::protocols::make_airplay_receiver_session(
-                ctx, cfg.airplay_port, std::move(*keypair), cfg.device_name, mac_address));
-        }
-        if (cfg.enable_cast) {
-            start_receiver_session(
-                mirage::protocols::make_cast_receiver_session(ctx, cfg.cast_port, cfg.device_name));
-        }
-        if (cfg.enable_miracast) {
-            start_receiver_session(mirage::protocols::make_wfd_receiver_session(ctx));
+        for (const auto& source : receiver_sources.all()) {
+            if (!source.enabled) {
+                continue;
+            }
+            auto session = mirage::protocols::make_receiver_session(ctx, source, &*keypair,
+                                                                    cfg.device_name, mac_address);
+            if (!session) {
+                print_receiver_start_error(source.id, source.port, session.error());
+                continue;
+            }
+            start_receiver_session(std::move(*session));
         }
         if (mdns) {
             mirage::io::co_spawn(ctx, mdns->run());
@@ -875,14 +878,15 @@ int main(int argc, char* argv[]) {
 
         mirage::log::user("mirage started{}",
                           local_ip.empty() ? "" : std::format(" on {}", local_ip));
-        if (cfg.enable_airplay) {
-            mirage::log::user("  airplay on port {}", cfg.airplay_port);
-        }
-        if (cfg.enable_cast) {
-            mirage::log::user("  cast on port {}", cfg.cast_port);
-        }
-        if (cfg.enable_miracast) {
-            mirage::log::user("  miracast enabled (stub)");
+        for (const auto& source : receiver_sources.all()) {
+            if (!source.enabled) {
+                continue;
+            }
+            if (source.port != 0) {
+                mirage::log::user("  {} on port {}", mirage::protocol_id(source.id), source.port);
+            } else {
+                mirage::log::user("  {} enabled", mirage::protocol_id(source.id));
+            }
         }
         if (!daemon_mode) {
             mirage::log::user("  press ctrl+c to stop.");

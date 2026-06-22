@@ -1,33 +1,47 @@
 #include "core/receiver_adapter.hpp"
 
 #include <algorithm>
+#include <span>
 #include <string_view>
 #include <utility>
 
 namespace mirage {
 namespace {
 
-receiver_adapter_status make_adapter(protocol id, bool enabled, uint16_t port,
+receiver_adapter_status make_adapter(protocol id, bool enabled, uint16_t port, bool experimental,
                                      std::string_view enabled_detail) {
     return {
         .id = id,
         .state = enabled ? receiver_adapter_state::unavailable : receiver_adapter_state::disabled,
         .port = port,
         .advertised = false,
-        .experimental = true,
+        .experimental = experimental,
         .detail = enabled ? std::string(enabled_detail) : "disabled by config",
     };
+}
+
+receiver_adapter_status make_adapter(const receiver_source_descriptor& source) {
+    return make_adapter(source.id, source.enabled, source.port, source.experimental, source.detail);
 }
 
 }  // namespace
 
 receiver_adapter_registry::receiver_adapter_registry(const config& cfg)
     : adapters_{
-          make_adapter(protocol::airplay, cfg.enable_airplay, cfg.airplay_port,
+          make_adapter(protocol::airplay, cfg.enable_airplay, cfg.airplay_port, true,
                        "rtsp/raop receiver"),
-          make_adapter(protocol::cast, cfg.enable_cast, cfg.cast_port, "cast v2 stub"),
-          make_adapter(protocol::miracast, cfg.enable_miracast, cfg.miracast_port, "wfd stub"),
+          make_adapter(protocol::cast, cfg.enable_cast, cfg.cast_port, true, "cast v2 receiver"),
+          make_adapter(protocol::miracast, cfg.enable_miracast, cfg.miracast_port, true,
+                       "wfd receiver"),
       } {}
+
+receiver_adapter_registry::receiver_adapter_registry(
+    std::span<const receiver_source_descriptor> sources) {
+    adapters_.reserve(sources.size());
+    for (const auto& source : sources) {
+        adapters_.push_back(make_adapter(source));
+    }
+}
 
 std::span<const receiver_adapter_status> receiver_adapter_registry::all() const {
     return {adapters_.data(), adapters_.size()};

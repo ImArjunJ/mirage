@@ -5,6 +5,7 @@
 
 #include "core/core.hpp"
 #include "core/receiver_adapter.hpp"
+#include "core/receiver_source.hpp"
 #include "io/io.hpp"
 
 namespace mirage {
@@ -13,17 +14,7 @@ namespace discovery {
 class service_publisher;
 }
 
-struct receiver_session_capabilities {
-    bool network_listener = false;
-    bool discovery = false;
-    bool pairing = false;
-    bool media_setup = false;
-    bool audio = false;
-    bool video = false;
-    bool remote_control = false;
-    bool metadata = false;
-    std::string_view transport;
-};
+using receiver_session_capabilities = receiver_source_capabilities;
 
 class receiver_session {
 public:

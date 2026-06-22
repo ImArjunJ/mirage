@@ -13,35 +13,26 @@ namespace {
 
 class airplay_receiver_session final : public receiver_session {
 public:
-    airplay_receiver_session(io::io_context& ctx, uint16_t port, crypto::ed25519_keypair keypair,
-                             std::string device_name, std::string mac_address)
+    airplay_receiver_session(io::io_context& ctx, receiver_source_descriptor source,
+                             crypto::ed25519_keypair keypair, std::string device_name,
+                             std::string mac_address)
         : ctx_(ctx),
-          port_(port),
+          source_(source),
           keypair_(std::move(keypair)),
           public_key_(keypair_.public_key()),
           device_name_(std::move(device_name)),
           mac_address_(std::move(mac_address)) {}
 
-    [[nodiscard]] protocol id() const override { return protocol::airplay; }
-    [[nodiscard]] uint16_t port() const override { return port_; }
+    [[nodiscard]] protocol id() const override { return source_.id; }
+    [[nodiscard]] uint16_t port() const override { return source_.port; }
 
     [[nodiscard]] receiver_session_capabilities capabilities() const override {
-        return {
-            .network_listener = true,
-            .discovery = true,
-            .pairing = true,
-            .media_setup = true,
-            .audio = true,
-            .video = true,
-            .remote_control = true,
-            .metadata = true,
-            .transport = "rtsp/raop",
-        };
+        return source_.capabilities;
     }
 
     result<void> start(receiver_adapter_registry& adapters,
                        discovery::service_publisher& publisher) override {
-        auto server = rtsp_server::bind(ctx_, port_, std::move(keypair_));
+        auto server = rtsp_server::bind(ctx_, source_.port, std::move(keypair_));
         if (!server) {
             adapters.mark_error(id(), server.error().message);
             return std::unexpected(server.error());
@@ -49,7 +40,7 @@ public:
         rtsp_.emplace(std::move(*server));
         adapters.mark_listening(id());
         publish_discovery(adapters, publisher);
-        log::info("rtsp server on port {}", port_);
+        log::info("rtsp server on port {}", source_.port);
         return {};
     }
 
@@ -76,8 +67,8 @@ private:
         }
 
         size_t advertised_records = 0;
-        auto airplay_service =
-            discovery::create_airplay_service(device_name_, port_, public_key_, mac_address_);
+        auto airplay_service = discovery::create_airplay_service(device_name_, source_.port,
+                                                                 public_key_, mac_address_);
         if (auto published = publisher.publish(id(), std::move(airplay_service)); !published) {
             log::error("failed to register airplay service: {}", published.error().message);
             adapters.set_detail(id(), published.error().message);
@@ -85,7 +76,8 @@ private:
             ++advertised_records;
         }
 
-        auto raop_service = discovery::create_raop_service(device_name_, port_, mac_address_);
+        auto raop_service =
+            discovery::create_raop_service(device_name_, source_.port, mac_address_);
         if (auto published = publisher.publish(id(), std::move(raop_service)); !published) {
             log::error("failed to register raop service: {}", published.error().message);
             adapters.set_detail(id(), published.error().message);
@@ -99,7 +91,7 @@ private:
     }
 
     io::io_context& ctx_;
-    uint16_t port_;
+    receiver_source_descriptor source_;
     crypto::ed25519_keypair keypair_;
     std::array<std::byte, 32> public_key_;
     std::string device_name_;
@@ -109,12 +101,13 @@ private:
 
 }  // namespace
 
-std::unique_ptr<receiver_session> make_airplay_receiver_session(io::io_context& ctx, uint16_t port,
+std::unique_ptr<receiver_session> make_airplay_receiver_session(io::io_context& ctx,
+                                                                receiver_source_descriptor source,
                                                                 crypto::ed25519_keypair keypair,
                                                                 std::string device_name,
                                                                 std::string mac_address) {
     return std::make_unique<airplay_receiver_session>(
-        ctx, port, std::move(keypair), std::move(device_name), std::move(mac_address));
+        ctx, source, std::move(keypair), std::move(device_name), std::move(mac_address));
 }
 
 }  // namespace mirage::protocols
