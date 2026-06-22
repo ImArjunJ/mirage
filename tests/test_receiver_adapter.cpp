@@ -1,8 +1,10 @@
 #include <iostream>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "core/receiver_adapter.hpp"
+#include "core/receiver_session.hpp"
 #include "core/receiver_source.hpp"
 
 namespace {
@@ -13,6 +15,60 @@ bool expect(bool condition, const char* message) {
         return false;
     }
     return true;
+}
+
+bool contract_validator_called = false;
+bool contract_factory_called = false;
+
+class contract_receiver_session final : public mirage::receiver_session {
+public:
+    explicit contract_receiver_session(mirage::receiver_source_descriptor source)
+        : source_(source) {}
+
+    [[nodiscard]] mirage::protocol id() const override { return source_.id; }
+    [[nodiscard]] uint16_t port() const override { return source_.port; }
+
+    [[nodiscard]] mirage::receiver_session_capabilities capabilities() const override {
+        return source_.capabilities;
+    }
+
+    mirage::result<void> start(mirage::receiver_adapter_registry& adapters,
+                               mirage::discovery::service_publisher& discovery) override {
+        static_cast<void>(discovery);
+        adapters.mark_running(id());
+        return {};
+    }
+
+    mirage::io::task<void> run() override { co_return; }
+
+    void stop(mirage::receiver_adapter_registry& adapters,
+              mirage::discovery::service_publisher& discovery) override {
+        static_cast<void>(discovery);
+        adapters.mark_stopped(id());
+    }
+
+private:
+    mirage::receiver_source_descriptor source_;
+};
+
+mirage::result<void> validate_contract_source(const mirage::receiver_source_descriptor& source,
+                                              const mirage::receiver_source_runtime& runtime) {
+    contract_validator_called = true;
+    if (source.id != mirage::protocol::cast) {
+        return std::unexpected(mirage::mirage_error::session("unexpected source id"));
+    }
+    if (runtime.device_name != "unit") {
+        return std::unexpected(mirage::mirage_error::session("unexpected device name"));
+    }
+    return {};
+}
+
+mirage::result<std::unique_ptr<mirage::receiver_session>> create_contract_session(
+    const mirage::receiver_source_descriptor& source,
+    const mirage::receiver_source_runtime& runtime) {
+    static_cast<void>(runtime);
+    contract_factory_called = true;
+    return std::make_unique<contract_receiver_session>(source);
 }
 
 }  // namespace
@@ -115,6 +171,49 @@ int main() {
                      .frames = 10,
                  }) == mirage::receiver_stream_health::attention,
                  "attention video health mismatch");
+
+    mirage::receiver_source_descriptor contract_source{
+        .id = mirage::protocol::cast,
+        .port = 9000,
+        .enabled = true,
+        .experimental = true,
+        .detail = "contract receiver",
+        .capabilities = {.network_listener = true, .discovery = true, .transport = "contract"},
+        .validate_source = validate_contract_source,
+        .session_factory = create_contract_session,
+    };
+    mirage::receiver_source_runtime contract_runtime{
+        .device_name = "unit",
+        .mac_address = "AA:BB:CC:DD:EE:FF",
+    };
+
+    auto validation = contract_source.validate(contract_runtime);
+    ok &= expect(validation.has_value(), "source validation failed");
+    ok &= expect(contract_validator_called, "source validator was not called");
+
+    contract_validator_called = false;
+    contract_factory_called = false;
+    auto contract_session = contract_source.create_session(contract_runtime);
+    ok &= expect(contract_session.has_value(), "source session creation failed");
+    ok &= expect(contract_validator_called, "source create did not validate first");
+    ok &= expect(contract_factory_called, "source factory was not called");
+    if (contract_session) {
+        ok &= expect((*contract_session)->id() == mirage::protocol::cast,
+                     "source session id mismatch");
+        ok &= expect((*contract_session)->port() == 9000, "source session port mismatch");
+        ok &= expect((*contract_session)->capabilities().transport == "contract",
+                     "source session capability mismatch");
+    }
+
+    auto disabled_source = contract_source;
+    disabled_source.enabled = false;
+    ok &= expect(!disabled_source.create_session(contract_runtime),
+                 "disabled source unexpectedly created a session");
+
+    auto incomplete_source = contract_source;
+    incomplete_source.session_factory = nullptr;
+    ok &= expect(!incomplete_source.create_session(contract_runtime),
+                 "source without factory unexpectedly created a session");
 
     return ok ? 0 : 1;
 }

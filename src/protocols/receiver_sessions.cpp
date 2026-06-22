@@ -8,6 +8,15 @@
 namespace mirage::protocols {
 namespace {
 
+result<void> validate_airplay_source(const receiver_source_descriptor& source,
+                                     const receiver_source_runtime& runtime);
+result<std::unique_ptr<receiver_session>> create_airplay_session(
+    const receiver_source_descriptor& source, const receiver_source_runtime& runtime);
+result<std::unique_ptr<receiver_session>> create_cast_session(
+    const receiver_source_descriptor& source, const receiver_source_runtime& runtime);
+result<std::unique_ptr<receiver_session>> create_wfd_session(
+    const receiver_source_descriptor& source, const receiver_source_runtime& runtime);
+
 receiver_source_descriptor airplay_source(const config& cfg) {
     return {
         .id = protocol::airplay,
@@ -27,6 +36,8 @@ receiver_source_descriptor airplay_source(const config& cfg) {
                 .metadata = true,
                 .transport = "rtsp/raop",
             },
+        .validate_source = validate_airplay_source,
+        .session_factory = create_airplay_session,
     };
 }
 
@@ -49,6 +60,7 @@ receiver_source_descriptor cast_source(const config& cfg) {
                 .metadata = true,
                 .transport = "cast-v2",
             },
+        .session_factory = create_cast_session,
     };
 }
 
@@ -71,7 +83,56 @@ receiver_source_descriptor wfd_source(const config& cfg) {
                 .metadata = false,
                 .transport = "wfd",
             },
+        .session_factory = create_wfd_session,
     };
+}
+
+result<void> validate_airplay_source(const receiver_source_descriptor& source,
+                                     const receiver_source_runtime& runtime) {
+    static_cast<void>(source);
+    if (runtime.io_context == nullptr) {
+        return std::unexpected(mirage_error::session("receiver runtime is missing an event loop"));
+    }
+    if (runtime.receiver_identity == nullptr) {
+        return std::unexpected(mirage_error::crypto("airplay receiver identity is not available"));
+    }
+    return {};
+}
+
+result<std::unique_ptr<receiver_session>> create_airplay_session(
+    const receiver_source_descriptor& source, const receiver_source_runtime& runtime) {
+    if (runtime.io_context == nullptr) {
+        return std::unexpected(mirage_error::session("receiver runtime is missing an event loop"));
+    }
+    if (runtime.receiver_identity == nullptr) {
+        return std::unexpected(mirage_error::crypto("airplay receiver identity is not available"));
+    }
+
+    auto keypair = runtime.receiver_identity->clone();
+    if (!keypair) {
+        return std::unexpected(keypair.error());
+    }
+
+    return make_airplay_receiver_session(*runtime.io_context, source, std::move(*keypair),
+                                         std::string(runtime.device_name),
+                                         std::string(runtime.mac_address));
+}
+
+result<std::unique_ptr<receiver_session>> create_cast_session(
+    const receiver_source_descriptor& source, const receiver_source_runtime& runtime) {
+    if (runtime.io_context == nullptr) {
+        return std::unexpected(mirage_error::session("receiver runtime is missing an event loop"));
+    }
+    return make_cast_receiver_session(*runtime.io_context, source,
+                                      std::string(runtime.device_name));
+}
+
+result<std::unique_ptr<receiver_session>> create_wfd_session(
+    const receiver_source_descriptor& source, const receiver_source_runtime& runtime) {
+    if (runtime.io_context == nullptr) {
+        return std::unexpected(mirage_error::session("receiver runtime is missing an event loop"));
+    }
+    return make_wfd_receiver_session(*runtime.io_context, source);
 }
 
 }  // namespace
@@ -82,25 +143,6 @@ std::vector<receiver_source_descriptor> make_receiver_source_descriptors(const c
         cast_source(cfg),
         wfd_source(cfg),
     };
-}
-
-result<std::unique_ptr<receiver_session>> make_receiver_session(
-    io::io_context& ctx, const receiver_source_descriptor& source,
-    crypto::ed25519_keypair* airplay_keypair, std::string device_name, std::string mac_address) {
-    switch (source.id) {
-        case protocol::airplay:
-            if (airplay_keypair == nullptr) {
-                return std::unexpected(
-                    mirage_error::crypto("airplay receiver identity is not available"));
-            }
-            return make_airplay_receiver_session(ctx, source, std::move(*airplay_keypair),
-                                                 std::move(device_name), std::move(mac_address));
-        case protocol::cast:
-            return make_cast_receiver_session(ctx, source, std::move(device_name));
-        case protocol::miracast:
-            return make_wfd_receiver_session(ctx, source);
-    }
-    std::unreachable();
 }
 
 }  // namespace mirage::protocols

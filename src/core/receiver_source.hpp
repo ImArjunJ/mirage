@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -10,6 +11,29 @@
 #include "core/core.hpp"
 
 namespace mirage {
+
+namespace crypto {
+class ed25519_keypair;
+}
+
+namespace io {
+class io_context;
+}
+
+class receiver_session;
+struct receiver_source_descriptor;
+
+struct receiver_source_runtime {
+    io::io_context* io_context = nullptr;
+    const crypto::ed25519_keypair* receiver_identity = nullptr;
+    std::string_view device_name;
+    std::string_view mac_address;
+};
+
+using receiver_source_validate_fn = result<void> (*)(const receiver_source_descriptor& source,
+                                                     const receiver_source_runtime& runtime);
+using receiver_source_session_factory = result<std::unique_ptr<receiver_session>> (*)(
+    const receiver_source_descriptor& source, const receiver_source_runtime& runtime);
 
 struct receiver_source_capabilities {
     bool network_listener = false;
@@ -30,6 +54,12 @@ struct receiver_source_descriptor {
     bool experimental = false;
     std::string_view detail;
     receiver_source_capabilities capabilities;
+    receiver_source_validate_fn validate_source = nullptr;
+    receiver_source_session_factory session_factory = nullptr;
+
+    [[nodiscard]] result<void> validate(const receiver_source_runtime& runtime) const;
+    [[nodiscard]] result<std::unique_ptr<receiver_session>> create_session(
+        const receiver_source_runtime& runtime) const;
 };
 
 enum class receiver_stream_health : uint8_t { clean, attention };

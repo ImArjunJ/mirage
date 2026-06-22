@@ -1,11 +1,43 @@
 #include "core/receiver_source.hpp"
 
 #include <algorithm>
+#include <format>
+#include <memory>
 #include <utility>
 
 #include "core/log.hpp"
+#include "core/receiver_session.hpp"
 
 namespace mirage {
+
+result<void> receiver_source_descriptor::validate(const receiver_source_runtime& runtime) const {
+    if (!enabled) {
+        return {};
+    }
+    if (validate_source == nullptr) {
+        return {};
+    }
+    return validate_source(*this, runtime);
+}
+
+result<std::unique_ptr<receiver_session>> receiver_source_descriptor::create_session(
+    const receiver_source_runtime& runtime) const {
+    if (!enabled) {
+        return std::unexpected(
+            mirage_error::session(std::format("{} receiver source is disabled", protocol_id(id))));
+    }
+
+    if (auto valid = validate(runtime); !valid) {
+        return std::unexpected(valid.error());
+    }
+
+    if (session_factory == nullptr) {
+        return std::unexpected(mirage_error::internal(
+            std::format("{} receiver source has no session factory", protocol_id(id))));
+    }
+
+    return session_factory(*this, runtime);
+}
 
 receiver_stream_health classify_audio_stream(const receiver_audio_stream_summary& summary) {
     if (summary.gaps == 0 && summary.resend_requests == 0 && summary.invalid == 0 &&

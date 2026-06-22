@@ -914,6 +914,12 @@ int main(int argc, char* argv[]) {
             mirage::log::info("built-in mdns broadcaster enabled");
         }
         std::vector<std::unique_ptr<mirage::receiver_session>> receiver_sessions;
+        const mirage::receiver_source_runtime receiver_runtime{
+            .io_context = &ctx,
+            .receiver_identity = &*keypair,
+            .device_name = cfg.device_name,
+            .mac_address = mac_address,
+        };
         auto start_receiver_session = [&](std::unique_ptr<mirage::receiver_session> session) {
             auto id = session->id();
             auto port = session->port();
@@ -932,8 +938,7 @@ int main(int argc, char* argv[]) {
             if (!source.enabled) {
                 continue;
             }
-            auto session = mirage::protocols::make_receiver_session(ctx, source, &*keypair,
-                                                                    cfg.device_name, mac_address);
+            auto session = source.create_session(receiver_runtime);
             if (!session) {
                 print_receiver_start_error(source.id, source.port, session.error());
                 continue;
