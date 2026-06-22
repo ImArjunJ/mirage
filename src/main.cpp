@@ -550,7 +550,8 @@ void remove_pid_file() {
 
 void write_status_json(int pid, const mirage::config& cfg, const std::string& ip,
                        const std::string& iface_name, const std::filesystem::path& identity_path,
-                       std::span<const mirage::receiver_adapter_status> adapters) {
+                       std::span<const mirage::receiver_adapter_status> adapters,
+                       std::span<const mirage::receiver_source_descriptor> sources) {
     auto now = std::chrono::system_clock::now();
     auto started = std::chrono::system_clock::to_time_t(now);
     auto path = status_file_path();
@@ -578,6 +579,22 @@ void write_status_json(int pid, const mirage::config& cfg, const std::string& ip
         f << ",\"advertised\":" << json_bool(adapter.advertised);
         f << ",\"experimental\":" << json_bool(adapter.experimental);
         f << ",\"detail\":\"" << json_escape(adapter.detail) << "\"";
+        const auto source =
+            std::ranges::find(sources, adapter.id, &mirage::receiver_source_descriptor::id);
+        if (source != sources.end()) {
+            const auto& caps = source->capabilities;
+            f << ",\"transport\":\"" << json_escape(caps.transport) << "\"";
+            f << ",\"capabilities\":{";
+            f << "\"network_listener\":" << json_bool(caps.network_listener);
+            f << ",\"discovery\":" << json_bool(caps.discovery);
+            f << ",\"pairing\":" << json_bool(caps.pairing);
+            f << ",\"media_setup\":" << json_bool(caps.media_setup);
+            f << ",\"audio\":" << json_bool(caps.audio);
+            f << ",\"video\":" << json_bool(caps.video);
+            f << ",\"remote_control\":" << json_bool(caps.remote_control);
+            f << ",\"metadata\":" << json_bool(caps.metadata);
+            f << "}";
+        }
         f << "}";
     }
     f << "]";
@@ -873,7 +890,7 @@ int main(int argc, char* argv[]) {
 
         if (daemon_mode) {
             write_status_json(current_pid(), cfg, local_ip, iface_name, receiver_identity_path,
-                              adapters.all());
+                              adapters.all(), receiver_sources.all());
         }
 
         mirage::log::user("mirage started{}",

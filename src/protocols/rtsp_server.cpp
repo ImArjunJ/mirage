@@ -529,14 +529,17 @@ static std::vector<int> parse_sdp_ints(std::string_view text) {
     }
     return values;
 }
-rtsp_session::rtsp_session(io::tcp_stream socket, crypto::fairplay_pairing pairing)
+rtsp_session::rtsp_session(io::tcp_stream socket, crypto::fairplay_pairing pairing,
+                           receiver_source_descriptor source)
     : socket_(std::move(socket)),
       pairing_(std::move(pairing)),
       media_sink_(media::make_local_media_sink()),
+      source_(source),
       airplay_media_(*media_sink_) {}
-auto rtsp_session::create(io::tcp_stream socket, crypto::fairplay_pairing pairing)
-    -> std::shared_ptr<rtsp_session> {
-    return std::shared_ptr<rtsp_session>(new rtsp_session(std::move(socket), std::move(pairing)));
+auto rtsp_session::create(io::tcp_stream socket, crypto::fairplay_pairing pairing,
+                          receiver_source_descriptor source) -> std::shared_ptr<rtsp_session> {
+    return std::shared_ptr<rtsp_session>(
+        new rtsp_session(std::move(socket), std::move(pairing), source));
 }
 void rtsp_session::reset_audio_packet_state() {
     audio_resend_control_seqnum_ = 0;
@@ -1288,11 +1291,17 @@ io::task<result<rtsp_response>> rtsp_session::handle_setup(const rtsp_request& r
         mirage::log::info("RAOP SETUP: audio data={}, control={}, timing={}, ct={}, sr={}, ch={}",
                           audio_port, audio_control_port, timing_port, audio_ct_,
                           audio_sample_rate_, audio_channels_);
-        mirage::log::diagnostic(
-            "RAOP audio setup: codec={}, sample_rate={}, channels={}, spf={}, data_port={}, "
-            "control_port={}, timing_port={}",
-            airplay::audio_codec_label(audio_ct_), audio_sample_rate_, audio_channels_, audio_spf_,
-            audio_port, audio_control_port, timing_port);
+        log_receiver_audio_setup(source_,
+                                 {
+                                     .codec = airplay::audio_codec_label(audio_ct_),
+                                     .sample_rate = audio_sample_rate_,
+                                     .channels = audio_channels_,
+                                     .frames_per_packet = audio_spf_,
+                                     .data_port = audio_port,
+                                     .control_port = audio_control_port,
+                                     .timing_port = timing_port,
+                                 },
+                                 "RAOP audio setup");
         co_return rtsp_response{
             .status_code = 200,
             .status_text = "OK",
@@ -1397,11 +1406,15 @@ io::task<result<rtsp_response>> rtsp_session::handle_setup(const rtsp_request& r
                                   audio_port, audio_control_port, audio_ct_, audio_spf_,
                                   audio_sample_rate_);
             }
-            mirage::log::diagnostic(
-                "Audio stream setup: codec={}, sample_rate={}, channels={}, spf={}, data_port={}, "
-                "control_port={}",
-                airplay::audio_codec_label(audio_ct_), audio_sample_rate_, audio_channels_,
-                audio_spf_, audio_port, audio_control_port);
+            log_receiver_audio_setup(source_, {
+                                                  .codec = airplay::audio_codec_label(audio_ct_),
+                                                  .sample_rate = audio_sample_rate_,
+                                                  .channels = audio_channels_,
+                                                  .frames_per_packet = audio_spf_,
+                                                  .data_port = audio_port,
+                                                  .control_port = audio_control_port,
+                                                  .timing_port = std::nullopt,
+                                              });
             if (!configure_audio_decoder()) {
                 mirage::log::error("Failed to create audio decoder for SETUP type 96");
             }
@@ -1644,10 +1657,10 @@ io::task<void> rtsp_session::run_mirror_receiver() {
                 }
             }
             auto stats = airplay_media_.video_stats();
-            const char* video_health =
-                (stats.frames > 0 && stats.keyframes > 0) ? "clean" : "attention";
-            mirage::log::diagnostic("Video stream summary: health={}, frames={}, keyframes={}",
-                                    video_health, stats.frames, stats.keyframes);
+            log_receiver_video_summary(source_, {
+                                                    .frames = stats.frames,
+                                                    .keyframes = stats.keyframes,
+                                                });
             if (!airplay_media_.video_open()) {
                 mirage::log::info("Window closed, tearing down session");
                 state_ = rtsp_session_state::teardown;
@@ -1728,16 +1741,16 @@ io::task<void> rtsp_session::run_audio_receiver() {
 
     media_sink_->on_audio_teardown();
     auto stats = airplay_media_.audio_stats();
-    const char* audio_health =
-        (stats.gaps == 0 && stats.resend_requests == 0 && stats.invalid == 0 && stats.pending == 0)
-            ? "clean"
-            : "attention";
-    mirage::log::diagnostic(
-        "Audio stream summary: health={}, decoded_packets={}, silent_or_marker={}, gaps={}, "
-        "resend_requests={}, stale_or_redundant={}, duplicates={}, invalid={}, pending={}",
-        audio_health, stats.decoded_packets, stats.silent_or_marker, stats.gaps,
-        stats.resend_requests, stats.stale_or_redundant, stats.duplicates, stats.invalid,
-        stats.pending);
+    log_receiver_audio_summary(source_, {
+                                            .decoded_packets = stats.decoded_packets,
+                                            .silent_or_marker = stats.silent_or_marker,
+                                            .gaps = stats.gaps,
+                                            .resend_requests = stats.resend_requests,
+                                            .stale_or_redundant = stats.stale_or_redundant,
+                                            .duplicates = stats.duplicates,
+                                            .invalid = stats.invalid,
+                                            .pending = stats.pending,
+                                        });
     audio_receiver_started_ = false;
 }
 io::task<void> rtsp_session::run_audio_control_receiver() {
@@ -2160,16 +2173,18 @@ struct rtsp_server::session_store {
     uint64_t next_id = 1;
     bool stopping = false;
 };
-rtsp_server::rtsp_server(io::tcp_acceptor acceptor, crypto::ed25519_keypair keypair)
+rtsp_server::rtsp_server(io::tcp_acceptor acceptor, receiver_source_descriptor source,
+                         crypto::ed25519_keypair keypair)
     : acceptor_(std::move(acceptor)),
+      source_(source),
       keypair_(std::move(keypair)),
       sessions_(std::make_shared<session_store>()) {}
-auto rtsp_server::bind(io::io_context& ctx, uint16_t port, crypto::ed25519_keypair keypair)
-    -> result<rtsp_server> {
+auto rtsp_server::bind(io::io_context& ctx, receiver_source_descriptor source,
+                       crypto::ed25519_keypair keypair) -> result<rtsp_server> {
     try {
-        auto acceptor = io::tcp_acceptor::bind(ctx, port);
-        mirage::log::info("RTSP server bound to port {}", port);
-        return rtsp_server{std::move(acceptor), std::move(keypair)};
+        auto acceptor = io::tcp_acceptor::bind(ctx, source.port);
+        mirage::log::info("RTSP server bound to port {}", source.port);
+        return rtsp_server{std::move(acceptor), source, std::move(keypair)};
     } catch (const std::exception& e) {
         return std::unexpected(
             mirage_error::network(std::format("failed to bind RTSP server: {}", e.what())));
@@ -2187,7 +2202,7 @@ io::task<void> rtsp_server::run() {
                 continue;
             }
             crypto::fairplay_pairing pairing{std::move(*cloned_keypair)};
-            auto session = rtsp_session::create(std::move(socket), std::move(pairing));
+            auto session = rtsp_session::create(std::move(socket), std::move(pairing), source_);
             auto sessions = sessions_;
             auto session_id = sessions->add(session);
             io::co_spawn(acceptor_.context(), [session, sessions, session_id]() -> io::task<void> {

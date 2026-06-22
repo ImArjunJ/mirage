@@ -32,7 +32,7 @@ public:
 
     result<void> start(receiver_adapter_registry& adapters,
                        discovery::service_publisher& publisher) override {
-        auto server = rtsp_server::bind(ctx_, source_.port, std::move(keypair_));
+        auto server = rtsp_server::bind(ctx_, source_, std::move(keypair_));
         if (!server) {
             adapters.mark_error(id(), server.error().message);
             return std::unexpected(server.error());

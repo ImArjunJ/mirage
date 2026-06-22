@@ -96,5 +96,25 @@ int main() {
                      "source cast detail mismatch");
     }
 
+    ok &= expect(mirage::classify_audio_stream({
+                     .decoded_packets = 10,
+                     .silent_or_marker = 1,
+                 }) == mirage::receiver_stream_health::clean,
+                 "clean audio health mismatch");
+    ok &= expect(mirage::classify_audio_stream({
+                     .decoded_packets = 10,
+                     .invalid = 1,
+                 }) == mirage::receiver_stream_health::attention,
+                 "attention audio health mismatch");
+    ok &= expect(mirage::classify_video_stream({
+                     .frames = 10,
+                     .keyframes = 1,
+                 }) == mirage::receiver_stream_health::clean,
+                 "clean video health mismatch");
+    ok &= expect(mirage::classify_video_stream({
+                     .frames = 10,
+                 }) == mirage::receiver_stream_health::attention,
+                 "attention video health mismatch");
+
     return ok ? 0 : 1;
 }

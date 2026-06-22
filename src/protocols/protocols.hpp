@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "core/core.hpp"
+#include "core/receiver_source.hpp"
 #include "crypto/crypto.hpp"
 #include "io/io.hpp"
 #include "media/pipeline.hpp"
@@ -39,7 +40,8 @@ struct rtsp_response {
 class rtsp_session : public std::enable_shared_from_this<rtsp_session> {
 public:
     static std::shared_ptr<rtsp_session> create(io::tcp_stream socket,
-                                                crypto::fairplay_pairing pairing);
+                                                crypto::fairplay_pairing pairing,
+                                                receiver_source_descriptor source);
     io::task<result<void>> run();
     void stop();
     [[nodiscard]] rtsp_session_state state() const { return state_; }
@@ -72,7 +74,8 @@ private:
     void close_audio_stream();
     void close_video_stream();
     void close_stream_sockets();
-    rtsp_session(io::tcp_stream socket, crypto::fairplay_pairing pairing);
+    rtsp_session(io::tcp_stream socket, crypto::fairplay_pairing pairing,
+                 receiver_source_descriptor source);
     io::tcp_stream socket_;
     crypto::fairplay_pairing pairing_;
     rtsp_session_state state_ = rtsp_session_state::init;
@@ -85,6 +88,7 @@ private:
     std::unique_ptr<io::udp_socket> audio_data_socket_;
     std::unique_ptr<io::udp_socket> audio_control_socket_;
     std::unique_ptr<media::media_sink> media_sink_;
+    receiver_source_descriptor source_;
     airplay::media_source airplay_media_;
     io::endpoint client_timing_endpoint_;
     bool base_receivers_started_ = false;
@@ -102,15 +106,17 @@ private:
 };
 class rtsp_server {
 public:
-    static result<rtsp_server> bind(io::io_context& ctx, uint16_t port,
+    static result<rtsp_server> bind(io::io_context& ctx, receiver_source_descriptor source,
                                     crypto::ed25519_keypair keypair);
     io::task<void> run();
     void stop();
 
 private:
     struct session_store;
-    rtsp_server(io::tcp_acceptor acceptor, crypto::ed25519_keypair keypair);
+    rtsp_server(io::tcp_acceptor acceptor, receiver_source_descriptor source,
+                crypto::ed25519_keypair keypair);
     io::tcp_acceptor acceptor_;
+    receiver_source_descriptor source_;
     crypto::ed25519_keypair keypair_;
     std::shared_ptr<session_store> sessions_;
     bool running_ = false;

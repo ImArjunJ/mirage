@@ -3,7 +3,63 @@
 #include <algorithm>
 #include <utility>
 
+#include "core/log.hpp"
+
 namespace mirage {
+
+receiver_stream_health classify_audio_stream(const receiver_audio_stream_summary& summary) {
+    if (summary.gaps == 0 && summary.resend_requests == 0 && summary.invalid == 0 &&
+        summary.pending == 0) {
+        return receiver_stream_health::clean;
+    }
+    return receiver_stream_health::attention;
+}
+
+receiver_stream_health classify_video_stream(const receiver_video_stream_summary& summary) {
+    if (summary.frames > 0 && summary.keyframes > 0) {
+        return receiver_stream_health::clean;
+    }
+    return receiver_stream_health::attention;
+}
+
+void log_receiver_audio_setup(const receiver_source_descriptor& source,
+                              const receiver_audio_stream_setup& setup, std::string_view label) {
+    if (setup.timing_port) {
+        log::diagnostic(
+            "{}: codec={}, sample_rate={}, channels={}, spf={}, data_port={}, "
+            "control_port={}, timing_port={}, source={}, transport={}",
+            label, setup.codec, setup.sample_rate, setup.channels, setup.frames_per_packet,
+            setup.data_port, setup.control_port, *setup.timing_port, protocol_id(source.id),
+            source.capabilities.transport);
+        return;
+    }
+
+    log::diagnostic(
+        "{}: codec={}, sample_rate={}, channels={}, spf={}, data_port={}, control_port={}, "
+        "source={}, transport={}",
+        label, setup.codec, setup.sample_rate, setup.channels, setup.frames_per_packet,
+        setup.data_port, setup.control_port, protocol_id(source.id), source.capabilities.transport);
+}
+
+void log_receiver_audio_summary(const receiver_source_descriptor& source,
+                                const receiver_audio_stream_summary& summary) {
+    log::diagnostic(
+        "Audio stream summary: health={}, decoded_packets={}, silent_or_marker={}, gaps={}, "
+        "resend_requests={}, stale_or_redundant={}, duplicates={}, invalid={}, pending={}, "
+        "source={}, transport={}",
+        to_string(classify_audio_stream(summary)), summary.decoded_packets,
+        summary.silent_or_marker, summary.gaps, summary.resend_requests, summary.stale_or_redundant,
+        summary.duplicates, summary.invalid, summary.pending, protocol_id(source.id),
+        source.capabilities.transport);
+}
+
+void log_receiver_video_summary(const receiver_source_descriptor& source,
+                                const receiver_video_stream_summary& summary) {
+    log::diagnostic(
+        "Video stream summary: health={}, frames={}, keyframes={}, source={}, transport={}",
+        to_string(classify_video_stream(summary)), summary.frames, summary.keyframes,
+        protocol_id(source.id), source.capabilities.transport);
+}
 
 receiver_source_registry::receiver_source_registry(std::vector<receiver_source_descriptor> sources)
     : sources_(std::move(sources)) {}
