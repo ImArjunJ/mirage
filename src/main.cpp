@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <memory>
 #include <print>
 #include <span>
 #include <string>
@@ -25,10 +26,11 @@
 #include "core/core.hpp"
 #include "core/log.hpp"
 #include "core/receiver_adapter.hpp"
+#include "core/receiver_session.hpp"
 #include "crypto/crypto.hpp"
 #include "discovery/discovery.hpp"
 #include "io/event_loop.hpp"
-#include "protocols/protocols.hpp"
+#include "protocols/receiver_sessions.hpp"
 namespace {
 volatile std::sig_atomic_t signal_received = 0;
 void signal_handler(int signal) {
@@ -583,6 +585,26 @@ void write_status_json(int pid, const mirage::config& cfg, const std::string& ip
     f << "}";
 }
 
+void print_receiver_start_error(mirage::protocol id, uint16_t port,
+                                const mirage::mirage_error& error) {
+    switch (id) {
+        case mirage::protocol::airplay:
+            std::println(stderr, "could not start airplay on port {}.", port);
+            std::println(stderr,
+                         "  the port may be in use. try --port <port> to use a different one,");
+            std::println(stderr, "  or run: lsof -i :{}", port);
+            break;
+        case mirage::protocol::cast:
+            std::println(stderr, "could not start cast on port {}.", port);
+            std::println(stderr, "  the port may be in use. try a different port or check:");
+            std::println(stderr, "  lsof -i :{}", port);
+            break;
+        case mirage::protocol::miracast:
+            mirage::log::error("failed to start miracast: {}", error.message);
+            break;
+    }
+}
+
 int current_pid() {
 #ifdef _WIN32
     return static_cast<int>(GetCurrentProcessId());
@@ -841,59 +863,34 @@ int main(int argc, char* argv[]) {
             }
             mirage::log::info("cast enabled on port {} (uuid: {})", cfg.cast_port, uuid);
         }
-        std::optional<mirage::protocols::rtsp_server> rtsp;
+        std::vector<std::unique_ptr<mirage::receiver_session>> receiver_sessions;
+        auto start_receiver_session = [&](std::unique_ptr<mirage::receiver_session> session) {
+            auto id = session->id();
+            auto port = session->port();
+            auto started = session->start(adapters);
+            if (!started) {
+                print_receiver_start_error(id, port, started.error());
+                return;
+            }
+
+            auto task = session->run();
+            receiver_sessions.push_back(std::move(session));
+            mirage::io::co_spawn(ctx, std::move(task));
+        };
+
         if (cfg.enable_airplay) {
-            auto server =
-                mirage::protocols::rtsp_server::bind(ctx, cfg.airplay_port, std::move(*keypair));
-            if (server) {
-                rtsp.emplace(std::move(*server));
-                adapters.mark_listening(mirage::protocol::airplay);
-                mirage::log::info("rtsp server on port {}", cfg.airplay_port);
-            } else {
-                adapters.mark_error(mirage::protocol::airplay, server.error().message);
-                std::println(stderr, "could not start airplay on port {}.", cfg.airplay_port);
-                std::println(stderr,
-                             "  the port may be in use. try --port <port> to use a different one,");
-                std::println(stderr, "  or run: lsof -i :{}", cfg.airplay_port);
-            }
+            start_receiver_session(mirage::protocols::make_airplay_receiver_session(
+                ctx, cfg.airplay_port, std::move(*keypair)));
         }
-        std::optional<mirage::protocols::cast_receiver> cast;
         if (cfg.enable_cast) {
-            auto receiver = mirage::protocols::cast_receiver::bind(ctx, cfg.cast_port);
-            if (receiver) {
-                cast.emplace(std::move(*receiver));
-                adapters.mark_listening(mirage::protocol::cast);
-                mirage::log::info("cast receiver on port {}", cfg.cast_port);
-            } else {
-                adapters.mark_error(mirage::protocol::cast, receiver.error().message);
-                std::println(stderr, "could not start cast on port {}.", cfg.cast_port);
-                std::println(stderr, "  the port may be in use. try a different port or check:");
-                std::println(stderr, "  lsof -i :{}", cfg.cast_port);
-            }
+            start_receiver_session(
+                mirage::protocols::make_cast_receiver_session(ctx, cfg.cast_port));
         }
-        std::optional<mirage::protocols::wfd_session> wfd;
         if (cfg.enable_miracast) {
-            auto session = mirage::protocols::wfd_session::create(ctx);
-            if (session) {
-                wfd.emplace(std::move(*session));
-                adapters.mark_running(mirage::protocol::miracast);
-                mirage::log::info("miracast enabled (stub)");
-            } else {
-                adapters.mark_error(mirage::protocol::miracast, session.error().message);
-                mirage::log::error("failed to start miracast: {}", session.error().message);
-            }
+            start_receiver_session(mirage::protocols::make_wfd_receiver_session(ctx));
         }
         if (mdns) {
             mirage::io::co_spawn(ctx, mdns->run());
-        }
-        if (rtsp) {
-            mirage::io::co_spawn(ctx, rtsp->run());
-        }
-        if (cast) {
-            mirage::io::co_spawn(ctx, cast->run());
-        }
-        if (wfd) {
-            mirage::io::co_spawn(ctx, wfd->run());
         }
 
         if (daemon_mode) {
@@ -922,17 +919,8 @@ int main(int argc, char* argv[]) {
         if (mdns) {
             mdns->stop();
         }
-        if (rtsp) {
-            rtsp->stop();
-            adapters.mark_stopped(mirage::protocol::airplay);
-        }
-        if (cast) {
-            cast->stop();
-            adapters.mark_stopped(mirage::protocol::cast);
-        }
-        if (wfd) {
-            wfd->stop();
-            adapters.mark_stopped(mirage::protocol::miracast);
+        for (auto& session : receiver_sessions) {
+            session->stop(adapters);
         }
         drain_shutdown_work(ctx);
         ctx.stop();

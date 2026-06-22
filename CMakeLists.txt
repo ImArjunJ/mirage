@@ -115,6 +115,9 @@ add_executable(mirage
     src/protocols/rtsp_server.cpp
     src/protocols/cast_channel.cpp
     src/protocols/wfd_session.cpp
+    src/protocols/airplay/receiver_session.cpp
+    src/protocols/cast/receiver_session.cpp
+    src/protocols/wfd/receiver_session.cpp
     src/io/tcp.cpp
     src/io/udp.cpp
     src/platform/window.cpp
@@ -189,6 +192,15 @@ if(BUILD_TESTING)
     target_compile_options(mirage_receiver_adapter_test PRIVATE ${MIRAGE_CXX_FLAGS})
     target_link_options(mirage_receiver_adapter_test PRIVATE ${MIRAGE_LINK_FLAGS})
     add_test(NAME receiver_adapter COMMAND mirage_receiver_adapter_test)
+
+    add_executable(mirage_receiver_session_test
+        tests/test_receiver_session.cpp
+        src/core/receiver_adapter.cpp
+    )
+    target_include_directories(mirage_receiver_session_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_options(mirage_receiver_session_test PRIVATE ${MIRAGE_CXX_FLAGS})
+    target_link_options(mirage_receiver_session_test PRIVATE ${MIRAGE_LINK_FLAGS})
+    add_test(NAME receiver_session COMMAND mirage_receiver_session_test)
 
     if(UNIX)
         add_test(NAME raop_smoke
