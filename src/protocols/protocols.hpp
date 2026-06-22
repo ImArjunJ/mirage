@@ -6,10 +6,10 @@
 #include <unordered_map>
 #include <vector>
 
-#include "audio/audio.hpp"
 #include "core/core.hpp"
 #include "crypto/crypto.hpp"
 #include "io/io.hpp"
+#include "media/pipeline.hpp"
 #include "protocols/airplay_protocol.hpp"
 namespace mirage::protocols {
 enum class rtsp_session_state : uint8_t {
@@ -67,6 +67,7 @@ private:
     io::task<void> run_audio_control_receiver();
     void process_audio_packet(std::span<const std::byte> rtp_packet, size_t len);
     bool configure_audio_decoder();
+    [[nodiscard]] media::audio_stream_config current_audio_config() const;
     bool queue_audio_packet(std::span<const std::byte> rtp_packet, uint16_t seqnum,
                             bool retransmitted);
     void drain_audio_packets();
@@ -95,8 +96,7 @@ private:
     std::unique_ptr<io::tcp_acceptor> mirror_acceptor_;
     std::unique_ptr<io::udp_socket> audio_data_socket_;
     std::unique_ptr<io::udp_socket> audio_control_socket_;
-    std::unique_ptr<audio::audio_player> audio_player_;
-    std::unique_ptr<audio::audio_decoder> audio_decoder_;
+    std::unique_ptr<media::media_sink> media_sink_;
     io::endpoint client_timing_endpoint_;
     bool base_receivers_started_ = false;
     bool mirror_receiver_started_ = false;

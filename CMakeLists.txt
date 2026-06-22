@@ -106,6 +106,7 @@ add_executable(mirage
     src/crypto/tlv8_chacha.cpp
     src/discovery/mdns_broadcaster.cpp
     src/discovery/interface_enum.cpp
+    src/media/local_media_sink.cpp
     src/media/vaapi_decoder.cpp
     src/media/nvdec_decoder.cpp
     src/media/ffmpeg_decoder.cpp
@@ -201,6 +202,14 @@ if(BUILD_TESTING)
     target_compile_options(mirage_receiver_session_test PRIVATE ${MIRAGE_CXX_FLAGS})
     target_link_options(mirage_receiver_session_test PRIVATE ${MIRAGE_LINK_FLAGS})
     add_test(NAME receiver_session COMMAND mirage_receiver_session_test)
+
+    add_executable(mirage_media_pipeline_test
+        tests/test_media_pipeline.cpp
+    )
+    target_include_directories(mirage_media_pipeline_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_options(mirage_media_pipeline_test PRIVATE ${MIRAGE_CXX_FLAGS})
+    target_link_options(mirage_media_pipeline_test PRIVATE ${MIRAGE_LINK_FLAGS})
+    add_test(NAME media_pipeline COMMAND mirage_media_pipeline_test)
 
     if(UNIX)
         add_test(NAME raop_smoke

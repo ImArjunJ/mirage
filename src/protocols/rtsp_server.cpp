@@ -13,15 +13,14 @@
 #include <string>
 #include <vector>
 
-#include "audio/audio.hpp"
 #include "core/core.hpp"
 #include "core/log.hpp"
 #include "crypto/crypto.hpp"
 #include "io/io.hpp"
 #include "media/media.hpp"
+#include "media/pipeline.hpp"
 #include "protocols/airplay_protocol.hpp"
 #include "protocols/protocols.hpp"
-#include "render/render.hpp"
 namespace mirage::protocols {
 namespace bplist {
 struct plist_value;
@@ -540,7 +539,9 @@ static std::vector<int> parse_sdp_ints(std::string_view text) {
     return values;
 }
 rtsp_session::rtsp_session(io::tcp_stream socket, crypto::fairplay_pairing pairing)
-    : socket_(std::move(socket)), pairing_(std::move(pairing)) {}
+    : socket_(std::move(socket)),
+      pairing_(std::move(pairing)),
+      media_sink_(media::make_local_media_sink()) {}
 auto rtsp_session::create(io::tcp_stream socket, crypto::fairplay_pairing pairing)
     -> std::shared_ptr<rtsp_session> {
     return std::shared_ptr<rtsp_session>(new rtsp_session(std::move(socket), std::move(pairing)));
@@ -568,15 +569,14 @@ void rtsp_session::close_audio_stream() {
     if (audio_control_socket_) {
         audio_control_socket_->close();
     }
-    if (audio_player_) {
-        audio_player_->stop();
-    }
+    media_sink_->on_audio_teardown();
     audio_receiver_started_ = false;
 }
 void rtsp_session::close_video_stream() {
     if (mirror_acceptor_) {
         mirror_acceptor_->close();
     }
+    media_sink_->on_video_teardown();
     mirror_receiver_started_ = false;
 }
 void rtsp_session::close_stream_sockets() {
@@ -1197,53 +1197,68 @@ result<rtsp_response> rtsp_session::handle_announce(const rtsp_request& req) {
         .body = {},
     };
 }
-bool rtsp_session::configure_audio_decoder() {
+media::audio_stream_config rtsp_session::current_audio_config() const {
+    media::audio_stream_config config{
+        .codec = audio_ct_ == 2 ? audio_codec::alac : audio_codec::aac,
+        .sample_rate = audio_sample_rate_,
+        .channels = audio_channels_,
+        .frames_per_packet = audio_spf_,
+        .codec_tag = audio_ct_,
+        .codec_config = {},
+    };
+
     if (audio_ct_ == 2) {
         uint32_t alac_spf = static_cast<uint32_t>(audio_spf_);
         uint32_t alac_sr = static_cast<uint32_t>(audio_sample_rate_);
-        std::array<std::byte, 36> alac_config{};
-        alac_config[0] = std::byte{0x00};
-        alac_config[1] = std::byte{0x00};
-        alac_config[2] = std::byte{0x00};
-        alac_config[3] = std::byte{0x24};
-        alac_config[4] = std::byte{'a'};
-        alac_config[5] = std::byte{'l'};
-        alac_config[6] = std::byte{'a'};
-        alac_config[7] = std::byte{'c'};
-        alac_config[8] = std::byte{0x00};
-        alac_config[9] = std::byte{0x00};
-        alac_config[10] = std::byte{0x00};
-        alac_config[11] = std::byte{0x00};
-        alac_config[12] = std::byte{static_cast<uint8_t>((alac_spf >> 24) & 0xFF)};
-        alac_config[13] = std::byte{static_cast<uint8_t>((alac_spf >> 16) & 0xFF)};
-        alac_config[14] = std::byte{static_cast<uint8_t>((alac_spf >> 8) & 0xFF)};
-        alac_config[15] = std::byte{static_cast<uint8_t>(alac_spf & 0xFF)};
-        alac_config[16] = std::byte{0x00};
-        alac_config[17] = std::byte{0x10};
-        alac_config[18] = std::byte{0x28};
-        alac_config[19] = std::byte{0x0A};
-        alac_config[20] = std::byte{0x0E};
-        alac_config[21] = std::byte{0x02};
-        alac_config[22] = std::byte{0x00};
-        alac_config[23] = std::byte{0xFF};
-        alac_config[24] = std::byte{0x00};
-        alac_config[25] = std::byte{0x00};
-        alac_config[26] = std::byte{0x00};
-        alac_config[27] = std::byte{0x00};
-        alac_config[28] = std::byte{0x00};
-        alac_config[29] = std::byte{0x00};
-        alac_config[30] = std::byte{0x00};
-        alac_config[31] = std::byte{0x00};
-        alac_config[32] = std::byte{static_cast<uint8_t>((alac_sr >> 24) & 0xFF)};
-        alac_config[33] = std::byte{static_cast<uint8_t>((alac_sr >> 16) & 0xFF)};
-        alac_config[34] = std::byte{static_cast<uint8_t>((alac_sr >> 8) & 0xFF)};
-        alac_config[35] = std::byte{static_cast<uint8_t>(alac_sr & 0xFF)};
-        audio_decoder_ =
-            audio::audio_decoder::create_alac(audio_sample_rate_, audio_channels_, alac_config);
-    } else {
-        audio_decoder_ = audio::audio_decoder::create_aac(audio_sample_rate_, audio_channels_);
+        config.codec_config.resize(36);
+        config.codec_config[0] = std::byte{0x00};
+        config.codec_config[1] = std::byte{0x00};
+        config.codec_config[2] = std::byte{0x00};
+        config.codec_config[3] = std::byte{0x24};
+        config.codec_config[4] = std::byte{'a'};
+        config.codec_config[5] = std::byte{'l'};
+        config.codec_config[6] = std::byte{'a'};
+        config.codec_config[7] = std::byte{'c'};
+        config.codec_config[8] = std::byte{0x00};
+        config.codec_config[9] = std::byte{0x00};
+        config.codec_config[10] = std::byte{0x00};
+        config.codec_config[11] = std::byte{0x00};
+        config.codec_config[12] = std::byte{static_cast<uint8_t>((alac_spf >> 24) & 0xFF)};
+        config.codec_config[13] = std::byte{static_cast<uint8_t>((alac_spf >> 16) & 0xFF)};
+        config.codec_config[14] = std::byte{static_cast<uint8_t>((alac_spf >> 8) & 0xFF)};
+        config.codec_config[15] = std::byte{static_cast<uint8_t>(alac_spf & 0xFF)};
+        config.codec_config[16] = std::byte{0x00};
+        config.codec_config[17] = std::byte{0x10};
+        config.codec_config[18] = std::byte{0x28};
+        config.codec_config[19] = std::byte{0x0A};
+        config.codec_config[20] = std::byte{0x0E};
+        config.codec_config[21] = std::byte{0x02};
+        config.codec_config[22] = std::byte{0x00};
+        config.codec_config[23] = std::byte{0xFF};
+        config.codec_config[24] = std::byte{0x00};
+        config.codec_config[25] = std::byte{0x00};
+        config.codec_config[26] = std::byte{0x00};
+        config.codec_config[27] = std::byte{0x00};
+        config.codec_config[28] = std::byte{0x00};
+        config.codec_config[29] = std::byte{0x00};
+        config.codec_config[30] = std::byte{0x00};
+        config.codec_config[31] = std::byte{0x00};
+        config.codec_config[32] = std::byte{static_cast<uint8_t>((alac_sr >> 24) & 0xFF)};
+        config.codec_config[33] = std::byte{static_cast<uint8_t>((alac_sr >> 16) & 0xFF)};
+        config.codec_config[34] = std::byte{static_cast<uint8_t>((alac_sr >> 8) & 0xFF)};
+        config.codec_config[35] = std::byte{static_cast<uint8_t>(alac_sr & 0xFF)};
     }
-    return static_cast<bool>(audio_decoder_);
+    return config;
+}
+
+bool rtsp_session::configure_audio_decoder() {
+    auto configured = media_sink_->on_audio_setup(current_audio_config());
+    if (!configured) {
+        mirage::log::error("Audio setup failed: {}", configured.error().message);
+        return false;
+    }
+    media_sink_->on_audio_volume(audio_volume_db_, audio_linear_volume_);
+    return true;
 }
 io::task<result<rtsp_response>> rtsp_session::handle_setup(const rtsp_request& req) {
     mirage::log::debug("SETUP request for {}", req.uri);
@@ -1646,16 +1661,16 @@ io::task<void> rtsp_session::run_mirror_receiver() {
             uint64_t frame_count = 0;
             uint64_t keyframe_count = 0;
             bool sps_pps_sent = false;
-            std::optional<media::unified_decoder> video_decoder;
-            auto decoder_result = media::unified_decoder::create(video_codec::h264, true);
-            if (decoder_result) {
-                video_decoder = std::move(*decoder_result);
-                mirage::log::info("Video decoder initialized: {}", video_decoder->backend_name());
-            } else {
-                mirage::log::warn("Failed to create video decoder: {}",
-                                  decoder_result.error().message);
+            auto video_setup = media_sink_->on_video_setup({
+                .codec = video_codec::h264,
+                .width = 1280,
+                .height = 720,
+                .prefer_hardware = true,
+                .title = "Mirage - AirPlay",
+            });
+            if (!video_setup) {
+                mirage::log::warn("Video setup failed: {}", video_setup.error().message);
             }
-            auto video_renderer = render::render_window::create("Mirage - AirPlay", 1280, 720);
             std::optional<crypto::aes_ctr_decryptor> video_decryptor;
             if (stream_connection_id_ != 0) {
                 if (fp_keymsg_.size() == 164 && fp_ekey_.size() == 72) {
@@ -1707,7 +1722,7 @@ io::task<void> rtsp_session::run_mirror_receiver() {
             }
             std::array<std::byte, 128> header;
             while (mirror_socket.is_open() && state_ != rtsp_session_state::teardown &&
-                   (!video_renderer || video_renderer->is_open())) {
+                   media_sink_->video_open()) {
                 try {
                     co_await mirror_socket.async_read_exactly(std::span<std::byte>(header));
                 } catch (const std::system_error& e) {
@@ -1805,7 +1820,7 @@ io::task<void> rtsp_session::run_mirror_receiver() {
                                             frame_count, offset, decrypted.size());
                                     }
                                 }
-                                if (video_decoder && video_renderer && video_renderer->is_open()) {
+                                if (media_sink_->video_open()) {
                                     std::vector<std::byte> annex_b;
                                     constexpr std::array<std::byte, 4> start_code{
                                         std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
@@ -1841,11 +1856,16 @@ io::task<void> rtsp_session::run_mirror_receiver() {
                                                                     nal_offset + 4 + nal_len));
                                         nal_offset += 4 + nal_len;
                                     }
-                                    auto decode_result = video_decoder->decode(annex_b);
-                                    if (decode_result && decode_result->has_value()) {
-                                        video_renderer->submit_frame(
-                                            std::move(decode_result->value()));
-                                    } else if (!decode_result) {
+                                    media::media_packet packet{
+                                        .stream = media::media_stream_type::video,
+                                        .payload = std::move(annex_b),
+                                        .sequence = frame_count,
+                                        .timestamp = 0,
+                                        .keyframe = is_keyframe,
+                                        .retransmitted = false,
+                                    };
+                                    auto decode_result = media_sink_->on_video_packet(packet);
+                                    if (!decode_result) {
                                         if (frame_count % 60 == 1) {
                                             mirage::log::debug("Decode: {}",
                                                                decode_result.error().message);
@@ -1917,11 +1937,12 @@ io::task<void> rtsp_session::run_mirror_receiver() {
                 (frame_count > 0 && keyframe_count > 0) ? "clean" : "attention";
             mirage::log::diagnostic("Video stream summary: health={}, frames={}, keyframes={}",
                                     video_health, frame_count, keyframe_count);
-            if (video_renderer && !video_renderer->is_open()) {
+            if (!media_sink_->video_open()) {
                 mirage::log::info("Window closed, tearing down session");
                 state_ = rtsp_session_state::teardown;
                 socket_.close();
             }
+            media_sink_->on_video_teardown();
         }
     } catch (const std::system_error& e) {
         if (mirror_receiver_started_ && state_ != rtsp_session_state::teardown &&
@@ -1933,12 +1954,12 @@ io::task<void> rtsp_session::run_mirror_receiver() {
     mirage::log::debug("Mirror receiver stopped");
 }
 void rtsp_session::process_audio_packet(std::span<const std::byte> rtp_packet, size_t len) {
-    if (len <= 12 || !audio_decoder_) {
+    if (len <= media::rtp_header::size) {
         return;
     }
 
-    auto payload_start = rtp_packet.data() + 12;
-    auto payload_len = len - 12;
+    auto payload_start = rtp_packet.data() + media::rtp_header::size;
+    auto payload_len = len - media::rtp_header::size;
 
     if (payload_len == 0) {
         ++audio_silent_marker_count_;
@@ -1980,8 +2001,7 @@ void rtsp_session::process_audio_packet(std::span<const std::byte> rtp_packet, s
                 "Audio payload looks like AAC-ELD while configured as ALAC; switching");
             audio_ct_ = 8;
             audio_spf_ = 480;
-            audio_decoder_ = audio::audio_decoder::create_aac(audio_sample_rate_, audio_channels_);
-            if (!audio_decoder_) {
+            if (!configure_audio_decoder()) {
                 mirage::log::error("Failed to switch audio decoder to AAC-ELD");
                 return;
             }
@@ -2007,9 +2027,27 @@ void rtsp_session::process_audio_packet(std::span<const std::byte> rtp_packet, s
         return;
     }
 
-    auto pcm = audio_decoder_->decode(decrypted);
-    if (!pcm.empty() && audio_player_) {
-        audio_player_->push_pcm(pcm);
+    uint16_t sequence =
+        static_cast<uint16_t>((static_cast<uint16_t>(static_cast<uint8_t>(rtp_packet[2])) << 8) |
+                              static_cast<uint16_t>(static_cast<uint8_t>(rtp_packet[3])));
+    uint32_t timestamp = (static_cast<uint32_t>(static_cast<uint8_t>(rtp_packet[4])) << 24) |
+                         (static_cast<uint32_t>(static_cast<uint8_t>(rtp_packet[5])) << 16) |
+                         (static_cast<uint32_t>(static_cast<uint8_t>(rtp_packet[6])) << 8) |
+                         static_cast<uint32_t>(static_cast<uint8_t>(rtp_packet[7]));
+    media::media_packet packet{
+        .stream = media::media_stream_type::audio,
+        .payload = std::move(decrypted),
+        .sequence = sequence,
+        .timestamp = timestamp,
+        .keyframe = false,
+        .retransmitted = false,
+    };
+    if (auto delivered = media_sink_->on_audio_packet(packet); !delivered) {
+        ++audio_invalid_payload_count_;
+        if (audio_invalid_payload_count_ <= 5 || audio_invalid_payload_count_ % 500 == 0) {
+            mirage::log::warn("Audio packet delivery failed: {}", delivered.error().message);
+        }
+        return;
     }
 
     ++audio_packet_count_;
@@ -2131,23 +2169,6 @@ io::task<void> rtsp_session::run_audio_receiver() {
     mirage::log::info("Audio receiver started on UDP port {}",
                       audio_data_socket_->local_endpoint().port);
 
-    if (!audio_decoder_) {
-        audio_decoder_ = audio::audio_decoder::create_aac(audio_sample_rate_, audio_channels_);
-    }
-    if (!audio_decoder_) {
-        mirage::log::error("Failed to create audio decoder");
-        co_return;
-    }
-
-    audio_player_ = audio::audio_player::create(audio_sample_rate_, audio_channels_);
-    if (!audio_player_) {
-        mirage::log::error("Failed to create audio player");
-        co_return;
-    }
-    audio_player_->set_volume(audio_linear_volume_);
-
-    mirage::log::info("Audio decoder and player initialized");
-
     std::array<std::byte, 2048> buf;
 
     try {
@@ -2192,9 +2213,7 @@ io::task<void> rtsp_session::run_audio_receiver() {
         }
     }
 
-    if (audio_player_) {
-        audio_player_->stop();
-    }
+    media_sink_->on_audio_teardown();
     const char* audio_health = (audio_gap_count_ == 0 && audio_resend_request_count_ == 0 &&
                                 audio_invalid_payload_count_ == 0 && audio_pending_packets_.empty())
                                    ? "clean"
@@ -2271,9 +2290,7 @@ result<rtsp_response> rtsp_session::handle_record(const rtsp_request& /* req */)
 result<rtsp_response> rtsp_session::handle_pause(const rtsp_request& /* req */) {
     mirage::log::debug("PAUSE request");
     state_ = rtsp_session_state::paused;
-    if (audio_player_) {
-        audio_player_->stop();
-    }
+    media_sink_->on_audio_pause();
     return rtsp_response{
         .status_code = 200,
         .status_text = "OK",
@@ -2284,6 +2301,7 @@ result<rtsp_response> rtsp_session::handle_pause(const rtsp_request& /* req */) 
 result<rtsp_response> rtsp_session::handle_flush(const rtsp_request& /* req */) {
     mirage::log::debug("FLUSH request");
     reset_audio_packet_state();
+    media_sink_->on_audio_flush();
     return rtsp_response{
         .status_code = 200,
         .status_text = "OK",
@@ -2576,9 +2594,7 @@ result<rtsp_response> rtsp_session::handle_set_parameter(const rtsp_request& req
                 try {
                     audio_volume_db_ = std::stof(body_str.substr(pos + 7));
                     audio_linear_volume_ = airplay::db_to_linear(audio_volume_db_);
-                    if (audio_player_) {
-                        audio_player_->set_volume(audio_linear_volume_);
-                    }
+                    media_sink_->on_audio_volume(audio_volume_db_, audio_linear_volume_);
                 } catch (const std::exception& e) {
                     mirage::log::warn("Invalid volume parameter: {}", e.what());
                 }
