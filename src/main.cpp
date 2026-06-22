@@ -802,7 +802,6 @@ int main(int argc, char* argv[]) {
             std::println(stderr, "  this is unusual -- check that openssl is installed correctly.");
             return 1;
         }
-        auto pubkey = keypair->public_key();
         auto interfaces = mirage::discovery::enumerate_interfaces();
         if (!interfaces) {
             std::println(stderr, "no network interfaces found.");
@@ -830,44 +829,20 @@ int main(int argc, char* argv[]) {
         mirage::receiver_adapter_registry adapters(cfg);
 
         std::optional<mirage::discovery::mdns_broadcaster> mdns;
+        std::optional<mirage::discovery::mdns_service_publisher> mdns_publisher;
+        mirage::discovery::disabled_service_publisher disabled_discovery;
+        mirage::discovery::service_publisher* discovery = &disabled_discovery;
         if (!no_mdns) {
             mdns.emplace(ctx);
+            mdns_publisher.emplace(*mdns);
+            discovery = &*mdns_publisher;
             mirage::log::info("built-in mdns broadcaster enabled");
-        }
-        if (cfg.enable_airplay && mdns) {
-            auto airplay_service = mirage::discovery::create_airplay_service(
-                cfg.device_name, cfg.airplay_port, pubkey, mac_address);
-            if (auto res = mdns->register_service(std::move(airplay_service)); !res) {
-                mirage::log::error("failed to register airplay service: {}", res.error().message);
-                adapters.set_detail(mirage::protocol::airplay, res.error().message);
-            }
-            auto raop_service = mirage::discovery::create_raop_service(
-                cfg.device_name, cfg.airplay_port, mac_address);
-            if (auto res = mdns->register_service(std::move(raop_service)); !res) {
-                mirage::log::error("failed to register raop service: {}", res.error().message);
-                adapters.set_detail(mirage::protocol::airplay, res.error().message);
-            } else {
-                adapters.mark_advertised(mirage::protocol::airplay);
-            }
-            mirage::log::info("airplay enabled on port {}", cfg.airplay_port);
-        }
-        if (cfg.enable_cast && mdns) {
-            auto uuid = mirage::generate_uuid();
-            auto cast_service =
-                mirage::discovery::create_cast_service(cfg.device_name, cfg.cast_port, uuid);
-            if (auto res = mdns->register_service(std::move(cast_service)); !res) {
-                mirage::log::error("failed to register cast service: {}", res.error().message);
-                adapters.set_detail(mirage::protocol::cast, res.error().message);
-            } else {
-                adapters.mark_advertised(mirage::protocol::cast);
-            }
-            mirage::log::info("cast enabled on port {} (uuid: {})", cfg.cast_port, uuid);
         }
         std::vector<std::unique_ptr<mirage::receiver_session>> receiver_sessions;
         auto start_receiver_session = [&](std::unique_ptr<mirage::receiver_session> session) {
             auto id = session->id();
             auto port = session->port();
-            auto started = session->start(adapters);
+            auto started = session->start(adapters, *discovery);
             if (!started) {
                 print_receiver_start_error(id, port, started.error());
                 return;
@@ -880,11 +855,11 @@ int main(int argc, char* argv[]) {
 
         if (cfg.enable_airplay) {
             start_receiver_session(mirage::protocols::make_airplay_receiver_session(
-                ctx, cfg.airplay_port, std::move(*keypair)));
+                ctx, cfg.airplay_port, std::move(*keypair), cfg.device_name, mac_address));
         }
         if (cfg.enable_cast) {
             start_receiver_session(
-                mirage::protocols::make_cast_receiver_session(ctx, cfg.cast_port));
+                mirage::protocols::make_cast_receiver_session(ctx, cfg.cast_port, cfg.device_name));
         }
         if (cfg.enable_miracast) {
             start_receiver_session(mirage::protocols::make_wfd_receiver_session(ctx));
@@ -916,11 +891,12 @@ int main(int argc, char* argv[]) {
             ctx.run_for(std::chrono::milliseconds(100));
         }
         mirage::log::info("received signal {}, shutting down", static_cast<int>(signal_received));
+        for (auto& session : receiver_sessions) {
+            session->stop(adapters, *discovery);
+        }
+        discovery->withdraw_all();
         if (mdns) {
             mdns->stop();
-        }
-        for (auto& session : receiver_sessions) {
-            session->stop(adapters);
         }
         drain_shutdown_work(ctx);
         ctx.stop();

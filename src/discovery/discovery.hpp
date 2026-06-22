@@ -18,6 +18,25 @@ struct service_record {
     std::vector<std::pair<std::string, std::string>> txt_records;
     [[nodiscard]] std::string full_name() const { return name + "." + service_type + "." + domain; }
 };
+
+class service_publisher {
+public:
+    virtual ~service_publisher() = default;
+
+    [[nodiscard]] virtual bool enabled() const = 0;
+    virtual result<void> publish(protocol owner, service_record record) = 0;
+    virtual void withdraw(protocol owner) = 0;
+    virtual void withdraw_all() = 0;
+};
+
+class disabled_service_publisher final : public service_publisher {
+public:
+    [[nodiscard]] bool enabled() const override { return false; }
+    result<void> publish(protocol, service_record) override { return {}; }
+    void withdraw(protocol) override {}
+    void withdraw_all() override {}
+};
+
 struct network_interface {
     std::string name;
     std::string mac_address;
@@ -27,6 +46,7 @@ struct network_interface {
 };
 result<std::vector<network_interface>> enumerate_interfaces();
 result<std::string> get_mac_address(std::string_view interface_name);
+
 class mdns_broadcaster {
 public:
     explicit mdns_broadcaster(io::io_context& ctx);
@@ -52,6 +72,28 @@ private:
     std::string hostname_;
     io::ip_address local_address_;
 };
+
+class mdns_service_publisher final : public service_publisher {
+public:
+    explicit mdns_service_publisher(mdns_broadcaster& mdns);
+
+    [[nodiscard]] bool enabled() const override { return true; }
+    result<void> publish(protocol owner, service_record record) override;
+    void withdraw(protocol owner) override;
+    void withdraw_all() override;
+
+private:
+    struct owned_service_record {
+        protocol owner;
+        service_record record;
+    };
+
+    void rebuild_mdns_records();
+
+    mdns_broadcaster& mdns_;
+    std::vector<owned_service_record> records_;
+};
+
 service_record create_airplay_service(std::string_view name, uint16_t port,
                                       std::span<const std::byte, 32> ed25519_pubkey,
                                       std::string_view mac_address);

@@ -6,6 +6,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "core/core.hpp"
@@ -90,6 +91,42 @@ result<void> mdns_broadcaster::register_service(service_record record) {
 void mdns_broadcaster::unregister_all() {
     services_.clear();
 }
+
+mdns_service_publisher::mdns_service_publisher(mdns_broadcaster& mdns) : mdns_(mdns) {}
+
+result<void> mdns_service_publisher::publish(protocol owner, service_record record) {
+    auto stored = record;
+    auto registered = mdns_.register_service(std::move(record));
+    if (!registered) {
+        return std::unexpected(registered.error());
+    }
+    records_.push_back({.owner = owner, .record = std::move(stored)});
+    return {};
+}
+
+void mdns_service_publisher::withdraw(protocol owner) {
+    auto old_size = records_.size();
+    std::erase_if(records_,
+                  [owner](const owned_service_record& record) { return record.owner == owner; });
+    if (records_.size() != old_size) {
+        rebuild_mdns_records();
+    }
+}
+
+void mdns_service_publisher::withdraw_all() {
+    records_.clear();
+    mdns_.unregister_all();
+}
+
+void mdns_service_publisher::rebuild_mdns_records() {
+    mdns_.unregister_all();
+    for (const auto& record : records_) {
+        if (auto registered = mdns_.register_service(record.record); !registered) {
+            log::warn("failed to rebuild discovery record: {}", registered.error().message);
+        }
+    }
+}
+
 io::task<result<void>> mdns_broadcaster::announce() {
     auto a_packet = build_a_record_response();
     mirage::log::trace("Announcing hostname A record: {} -> {} ({} bytes)", hostname_,

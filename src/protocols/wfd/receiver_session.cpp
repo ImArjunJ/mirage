@@ -2,6 +2,7 @@
 #include <utility>
 
 #include "core/log.hpp"
+#include "discovery/discovery.hpp"
 #include "protocols/protocols.hpp"
 #include "protocols/receiver_sessions.hpp"
 
@@ -29,7 +30,9 @@ public:
         };
     }
 
-    result<void> start(receiver_adapter_registry& adapters) override {
+    result<void> start(receiver_adapter_registry& adapters,
+                       discovery::service_publisher& discovery) override {
+        static_cast<void>(discovery);
         auto session = wfd_session::create(ctx_);
         if (!session) {
             adapters.mark_error(id(), session.error().message);
@@ -47,7 +50,9 @@ public:
         }
     }
 
-    void stop(receiver_adapter_registry& adapters) override {
+    void stop(receiver_adapter_registry& adapters,
+              discovery::service_publisher& discovery) override {
+        discovery.withdraw(id());
         if (session_) {
             session_->stop();
             adapters.mark_stopped(id());

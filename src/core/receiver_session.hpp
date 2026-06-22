@@ -9,6 +9,10 @@
 
 namespace mirage {
 
+namespace discovery {
+class service_publisher;
+}
+
 struct receiver_session_capabilities {
     bool network_listener = false;
     bool discovery = false;
@@ -29,9 +33,11 @@ public:
     [[nodiscard]] virtual uint16_t port() const = 0;
     [[nodiscard]] virtual receiver_session_capabilities capabilities() const = 0;
 
-    virtual result<void> start(receiver_adapter_registry& adapters) = 0;
+    virtual result<void> start(receiver_adapter_registry& adapters,
+                               discovery::service_publisher& discovery) = 0;
     virtual io::task<void> run() = 0;
-    virtual void stop(receiver_adapter_registry& adapters) = 0;
+    virtual void stop(receiver_adapter_registry& adapters,
+                      discovery::service_publisher& discovery) = 0;
 };
 
 }  // namespace mirage
