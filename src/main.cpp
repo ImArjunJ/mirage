@@ -455,12 +455,60 @@ int handle_status(bool verbose) {
             return {};
         }
         auto object_start = json.rfind('{', id_pos);
-        auto object_end = json.find('}', id_pos);
-        if (object_start == std::string::npos || object_end == std::string::npos ||
-            object_end <= object_start) {
+        if (object_start == std::string::npos) {
             return {};
         }
-        return std::string_view(json).substr(object_start, object_end - object_start + 1);
+        size_t depth = 0;
+        bool in_string = false;
+        bool escaped = false;
+        for (size_t pos = object_start; pos < json.size(); ++pos) {
+            char c = json[pos];
+            if (in_string) {
+                if (escaped) {
+                    escaped = false;
+                } else if (c == '\\') {
+                    escaped = true;
+                } else if (c == '"') {
+                    in_string = false;
+                }
+                continue;
+            }
+            if (c == '"') {
+                in_string = true;
+            } else if (c == '{') {
+                ++depth;
+            } else if (c == '}') {
+                --depth;
+                if (depth == 0) {
+                    return std::string_view(json).substr(object_start, pos - object_start + 1);
+                }
+            }
+        }
+        return {};
+    };
+
+    auto capability_summary = [&](std::string_view object) -> std::string {
+        std::string summary;
+        auto append = [&](const char* key, std::string_view label) {
+            auto enabled = extract_bool_from(object, key);
+            if (!enabled || !*enabled) {
+                return;
+            }
+            if (!summary.empty()) {
+                summary += "/";
+            }
+            summary += label;
+        };
+        append("audio", "audio");
+        append("video", "video");
+        append("remote_control", "remote");
+        append("metadata", "metadata");
+        return summary;
+    };
+
+    auto is_default_protocol_detail = [](std::string_view detail) {
+        return detail == "disabled by config" || detail == "rtsp/raop receiver" ||
+               detail == "cast v2 receiver" || detail == "wfd receiver";
     };
 
     auto name = extract_string("name");
@@ -502,14 +550,22 @@ int handle_status(bool verbose) {
             auto port = extract_int_from(object, "port");
             auto advertised = extract_bool_from(object, "advertised");
             auto detail = extract_string_from(object, "detail");
+            auto transport = extract_string_from(object, "transport");
+            auto caps = capability_summary(object);
             std::string line = std::format("    {}: {}", id, state.empty() ? "unknown" : state);
             if (port && *port > 0) {
                 line += std::format(", port {}", *port);
             }
-            if (advertised) {
-                line += std::format(", advertised {}", *advertised ? "yes" : "no");
+            if (!transport.empty()) {
+                line += std::format(", transport {}", transport);
             }
-            if (!detail.empty()) {
+            if (!caps.empty()) {
+                line += std::format(", {}", caps);
+            }
+            if (advertised && *advertised) {
+                line += ", advertised";
+            }
+            if (!detail.empty() && !is_default_protocol_detail(detail)) {
                 line += std::format(", {}", detail);
             }
             std::println(stderr, "{}", line);
