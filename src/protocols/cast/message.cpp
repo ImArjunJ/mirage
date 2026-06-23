@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cctype>
+#include <cmath>
 #include <format>
 #include <limits>
 #include <optional>
@@ -263,23 +264,62 @@ std::optional<double> extract_json_double(std::string_view json, std::string_vie
     while (pos < json.size() && std::isspace(static_cast<unsigned char>(json[pos])) != 0) {
         ++pos;
     }
-    auto end = pos;
-    if (end < json.size() && json[end] == '-') {
-        ++end;
+    double sign = 1.0;
+    if (pos < json.size() && json[pos] == '-') {
+        sign = -1.0;
+        ++pos;
     }
-    while (end < json.size() &&
-           (std::isdigit(static_cast<unsigned char>(json[end])) != 0 || json[end] == '.')) {
-        ++end;
+
+    double integer = 0.0;
+    bool has_digits = false;
+    while (pos < json.size() && std::isdigit(static_cast<unsigned char>(json[pos])) != 0) {
+        integer = integer * 10.0 + static_cast<double>(json[pos] - '0');
+        has_digits = true;
+        ++pos;
     }
-    if (end == pos) {
+
+    double fraction = 0.0;
+    double scale = 1.0;
+    if (pos < json.size() && json[pos] == '.') {
+        ++pos;
+        while (pos < json.size() && std::isdigit(static_cast<unsigned char>(json[pos])) != 0) {
+            fraction = fraction * 10.0 + static_cast<double>(json[pos] - '0');
+            scale *= 10.0;
+            has_digits = true;
+            ++pos;
+        }
+    }
+
+    if (!has_digits) {
         return std::nullopt;
     }
 
-    double value = 0;
-    auto [ptr, ec] = std::from_chars(json.data() + pos, json.data() + end, value);
-    if (ec != std::errc{} || ptr != json.data() + end) {
+    double value = sign * (integer + fraction / scale);
+    if (pos < json.size() && (json[pos] == 'e' || json[pos] == 'E')) {
+        ++pos;
+        int exponent_sign = 1;
+        if (pos < json.size() && (json[pos] == '-' || json[pos] == '+')) {
+            exponent_sign = json[pos] == '-' ? -1 : 1;
+            ++pos;
+        }
+
+        int exponent = 0;
+        bool has_exponent_digits = false;
+        while (pos < json.size() && std::isdigit(static_cast<unsigned char>(json[pos])) != 0) {
+            exponent = exponent * 10 + (json[pos] - '0');
+            has_exponent_digits = true;
+            ++pos;
+        }
+        if (!has_exponent_digits) {
+            return std::nullopt;
+        }
+        value *= std::pow(10.0, static_cast<double>(exponent_sign * exponent));
+    }
+
+    if (!std::isfinite(value)) {
         return std::nullopt;
     }
+
     return value;
 }
 
