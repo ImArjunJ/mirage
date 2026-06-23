@@ -186,6 +186,72 @@ int main() {
                      "load request id mismatch");
     }
 
+    channel_message media_status{
+        .protocol_version = 0,
+        .source_id = "sender-7",
+        .destination_id = "receiver-0",
+        .namespace_ = std::string(namespace_media),
+        .payload_type = channel_payload_type::string_payload,
+        .payload_utf8 = "{\"type\":\"GET_STATUS\",\"requestId\":14}",
+        .payload_binary = {},
+    };
+    auto media_status_response = handle_channel_message(media_status, "Living Room");
+    ok &= expect(media_status_response.size() == 1, "media status response count mismatch");
+    if (!media_status_response.empty()) {
+        ok &= expect(media_status_response.front().namespace_ == namespace_media,
+                     "media status response namespace mismatch");
+        ok &= expect(contains(media_status_response.front().payload_utf8,
+                              "\"type\":\"MEDIA_STATUS\""),
+                     "media status response type mismatch");
+        ok &= expect(contains(media_status_response.front().payload_utf8, "\"status\":[]"),
+                     "media status response body mismatch");
+        ok &= expect(contains(media_status_response.front().payload_utf8, "\"requestId\":14"),
+                     "media status request id mismatch");
+    }
+
+    channel_message media_stop{
+        .protocol_version = 0,
+        .source_id = "sender-8",
+        .destination_id = "receiver-0",
+        .namespace_ = std::string(namespace_media),
+        .payload_type = channel_payload_type::string_payload,
+        .payload_utf8 = "{\"type\":\"STOP\",\"requestId\":15,\"mediaSessionId\":1}",
+        .payload_binary = {},
+    };
+    auto media_stop_response = handle_channel_message(media_stop, "Living Room");
+    ok &= expect(media_stop_response.size() == 1, "media stop response count mismatch");
+    if (!media_stop_response.empty()) {
+        ok &= expect(contains(media_stop_response.front().payload_utf8,
+                              "\"type\":\"MEDIA_STATUS\""),
+                     "media stop status type mismatch");
+        ok &= expect(contains(media_stop_response.front().payload_utf8, "\"status\":[]"),
+                     "media stop status body mismatch");
+        ok &= expect(contains(media_stop_response.front().payload_utf8, "\"requestId\":15"),
+                     "media stop request id mismatch");
+    }
+
+    channel_message media_play{
+        .protocol_version = 0,
+        .source_id = "sender-9",
+        .destination_id = "receiver-0",
+        .namespace_ = std::string(namespace_media),
+        .payload_type = channel_payload_type::string_payload,
+        .payload_utf8 = "{\"type\":\"PLAY\",\"requestId\":16,\"mediaSessionId\":1}",
+        .payload_binary = {},
+    };
+    auto media_play_response = handle_channel_message(media_play, "Living Room");
+    ok &= expect(media_play_response.size() == 1, "media play response count mismatch");
+    if (!media_play_response.empty()) {
+        ok &= expect(contains(media_play_response.front().payload_utf8,
+                              "\"type\":\"INVALID_REQUEST\""),
+                     "media play invalid request type mismatch");
+        ok &= expect(contains(media_play_response.front().payload_utf8,
+                              "\"reason\":\"INVALID_MEDIA_SESSION_ID\""),
+                     "media play invalid reason mismatch");
+        ok &= expect(contains(media_play_response.front().payload_utf8, "\"requestId\":16"),
+                     "media play request id mismatch");
+    }
+
     std::vector<std::byte> invalid_varint(12, std::byte{0x80});
     ok &= expect(!parse_channel_message(invalid_varint).has_value(),
                  "invalid protobuf varint parsed");

@@ -147,6 +147,42 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     assert b'"reason":"NOT_SUPPORTED"' in response
     assert b'"requestId":3' in response
 
+    sock.sendall(
+        cast_message(
+            "urn:x-cast:com.google.cast.media",
+            '{"type":"GET_STATUS","requestId":6}',
+        )
+    )
+    length = struct.unpack(">I", recv_exact(sock, 4))[0]
+    response = recv_exact(sock, length)
+    assert b"MEDIA_STATUS" in response
+    assert b'"status":[]' in response
+    assert b'"requestId":6' in response
+
+    sock.sendall(
+        cast_message(
+            "urn:x-cast:com.google.cast.media",
+            '{"type":"LOAD","requestId":7}',
+        )
+    )
+    length = struct.unpack(">I", recv_exact(sock, 4))[0]
+    response = recv_exact(sock, length)
+    assert b"LOAD_FAILED" in response
+    assert b'"reason":"RECEIVER_APP_NOT_RUNNING"' in response
+    assert b'"requestId":7' in response
+
+    sock.sendall(
+        cast_message(
+            "urn:x-cast:com.google.cast.media",
+            '{"type":"PLAY","requestId":8,"mediaSessionId":1}',
+        )
+    )
+    length = struct.unpack(">I", recv_exact(sock, 4))[0]
+    response = recv_exact(sock, length)
+    assert b"INVALID_REQUEST" in response
+    assert b'"reason":"INVALID_MEDIA_SESSION_ID"' in response
+    assert b'"requestId":8' in response
+
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 context.check_hostname = False
 context.verify_mode = ssl.CERT_NONE
@@ -176,6 +212,18 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as raw
         assert b"LAUNCH_ERROR" in response
         assert b'"reason":"NOT_SUPPORTED"' in response
         assert b'"requestId":5' in response
+
+        sock.sendall(
+            cast_message(
+                "urn:x-cast:com.google.cast.media",
+                '{"type":"GET_STATUS","requestId":9}',
+            )
+        )
+        length = struct.unpack(">I", recv_exact(sock, 4))[0]
+        response = recv_exact(sock, length)
+        assert b"MEDIA_STATUS" in response
+        assert b'"status":[]' in response
+        assert b'"requestId":9' in response
 PY
 
 kill -INT "${pid}"

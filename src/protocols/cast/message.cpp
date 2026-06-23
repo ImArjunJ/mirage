@@ -279,6 +279,19 @@ std::string load_failed_payload(std::optional<int64_t> request_id) {
         request_id_fragment(request_id));
 }
 
+std::string media_status_payload(std::optional<int64_t> request_id) {
+    auto body = std::string("{\"type\":\"MEDIA_STATUS\",\"status\":[]");
+    body += request_id_fragment(request_id);
+    body += "}";
+    return body;
+}
+
+std::string media_invalid_request_payload(std::optional<int64_t> request_id,
+                                          std::string_view reason) {
+    return std::format("{{\"type\":\"INVALID_REQUEST\",\"reason\":\"{}\"{}}}",
+                       json_escape(reason), request_id_fragment(request_id));
+}
+
 std::string app_availability_payload(std::span<const std::string> app_ids,
                                      std::optional<int64_t> request_id) {
     std::string body = "{\"type\":\"GET_APP_AVAILABILITY\",\"availability\":{";
@@ -481,6 +494,30 @@ std::vector<channel_message> handle_channel_message(const channel_message& messa
         responses.push_back(make_string_message(
             message.source_id, namespace_media,
             load_failed_payload(extract_json_int(message.payload_utf8, "requestId"))));
+        return responses;
+    }
+
+    if (message.namespace_ == namespace_media && *type == "GET_STATUS") {
+        responses.push_back(make_string_message(
+            message.source_id, namespace_media,
+            media_status_payload(extract_json_int(message.payload_utf8, "requestId"))));
+        return responses;
+    }
+
+    if (message.namespace_ == namespace_media && *type == "STOP") {
+        responses.push_back(make_string_message(
+            message.source_id, namespace_media,
+            media_status_payload(extract_json_int(message.payload_utf8, "requestId"))));
+        return responses;
+    }
+
+    if (message.namespace_ == namespace_media &&
+        (*type == "PLAY" || *type == "PAUSE" || *type == "SEEK" ||
+         *type == "SET_PLAYBACK_RATE" || *type == "EDIT_TRACKS_INFO")) {
+        responses.push_back(make_string_message(
+            message.source_id, namespace_media,
+            media_invalid_request_payload(extract_json_int(message.payload_utf8, "requestId"),
+                                          "INVALID_MEDIA_SESSION_ID")));
         return responses;
     }
 
