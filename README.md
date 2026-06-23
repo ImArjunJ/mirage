@@ -1,25 +1,22 @@
 # mirage
 
-mirage is a local-network receiver.
+local-network receiver.
 
-The long-term shape is one small receiver core with protocol adapters for
-AirPlay, Google Cast, and Miracast / Wi-Fi Display. The core owns discovery,
-sessions, media setup, decode, rendering, audio output, diagnostics, and daemon
-state.
+one small receiver core, with adapters for airplay, cast, and miracast / wi-fi
+display.
 
-Right now, AirPlay is the useful path. Cast has discovery, probe, and TLS
-receiver control replies. Miracast / WFD has capability negotiation. Cast and
-WFD media streaming are not implemented yet.
+airplay is the useful path today. cast and miracast are present as early
+adapters, not full media receivers yet.
 
 ## status
 
-- AirPlay mirroring and audio are experimental, but usable on the tested iOS
-  path.
-- Linux is the main development target.
-- Windows builds in CI and has early platform plumbing.
-- macOS, Cast media streaming, and Miracast / WFD media streaming are later
-  work.
-- DRM / HDCP-protected content is not supported.
+- airplay mirroring and audio work on the tested ios path
+- cast has discovery, probe, tls control, and media status replies
+- miracast / wfd has capability negotiation
+- linux is the main runtime target
+- windows builds in ci; runtime support is early
+- macos, cast media streaming, and wfd media streaming are later
+- protected content is not supported
 
 ## build
 
@@ -28,8 +25,7 @@ cmake -B build
 cmake --build build -j$(nproc)
 ```
 
-You need a C++23 compiler, CMake 3.25+, OpenSSL, FFmpeg, Vulkan, and
-`glslc`.
+needs c++23, cmake 3.25+, openssl, ffmpeg, vulkan, and `glslc`.
 
 ## run
 
@@ -37,7 +33,7 @@ You need a C++23 compiler, CMake 3.25+, OpenSSL, FFmpeg, Vulkan, and
 ./build/mirage
 ```
 
-Useful modes:
+common modes:
 
 ```sh
 ./build/mirage --diagnostics
@@ -48,29 +44,31 @@ Useful modes:
 ./build/mirage stop
 ```
 
-Common options:
+common options:
 
 ```text
---name <name>          receiver name
---port <port>          AirPlay port, default 7000
+--name <name>          receiver name, default Mirage
+--port <port>          airplay port, default 7000
 --no-mdns              disable built-in discovery
 --identity-key <file>  persistent receiver identity
---cast                 enable experimental Cast probe adapter
---miracast             enable experimental Miracast capability listener
+--cast                 enable experimental cast adapter
+--miracast             enable experimental miracast adapter
 ```
 
 ## config
 
-Mirage loads a per-user config file when it exists:
+mirage loads a per-user config file when it exists:
 
-- Linux: `~/.config/mirage/config.conf`
-- Windows: `%APPDATA%\mirage\config.conf`
+- linux: `~/.config/mirage/config.conf`
+- windows: `%APPDATA%\mirage\config.conf`
 
-Command-line flags override the file.
+flags override the file.
 
 ```text
 name = Mirage
 airplay_port = 7000
+cast_port = 8009
+miracast_port = 7236
 enable_airplay = true
 enable_cast = false
 enable_miracast = false
@@ -85,22 +83,14 @@ identity_key = /path/to/identity.key
 ctest --test-dir build --output-on-failure
 ```
 
-For a quick real-device check:
+real-device smoke:
 
 ```sh
 ./build/mirage --diagnostics
 ```
 
-Connect from AirPlay, mirror or play audio, disconnect, then reconnect once.
-Healthy sessions end with `health=clean` in the audio and video summaries.
-
-## notes
-
-Mirage is for interoperability with unprotected local streaming. It should fail
-clearly when content is protected.
-
-GPL receiver projects are useful behavioral references, but their code should
-not be copied into this MIT project unless the licensing strategy changes.
+connect from airplay, mirror or play audio, disconnect, then reconnect once.
+healthy sessions end with `health=clean` in the audio and video summaries.
 
 ## license
 
