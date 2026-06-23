@@ -108,8 +108,10 @@ add_executable(mirage
     src/core/runtime_process.cpp
     src/core/runtime_status.cpp
     src/core/status_report.cpp
+    src/crypto/ed25519_keypair.cpp
     src/crypto/fairplay_pairing.cpp
     src/crypto/fairplay_sap.cpp
+    src/crypto/hash.cpp
     src/crypto/srp6a.cpp
     src/crypto/aes_ctr.cpp
     src/crypto/tlv8_chacha.cpp
@@ -356,11 +358,8 @@ if(BUILD_TESTING)
         src/protocols/airplay/source.cpp
         src/protocols/cast/source.cpp
         src/protocols/wfd/source.cpp
-        src/crypto/aes_ctr.cpp
-        src/crypto/fairplay_pairing.cpp
-        src/crypto/fairplay_sap.cpp
-        src/crypto/srp6a.cpp
-        src/crypto/tlv8_chacha.cpp
+        src/crypto/ed25519_keypair.cpp
+        src/crypto/hash.cpp
     )
     target_include_directories(mirage_receiver_sources_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_compile_options(mirage_receiver_sources_test PRIVATE ${MIRAGE_CXX_FLAGS})
@@ -373,11 +372,8 @@ if(BUILD_TESTING)
         src/core/receiver_identity.cpp
         src/core/error.cpp
         src/discovery/service_records.cpp
-        src/crypto/aes_ctr.cpp
-        src/crypto/fairplay_pairing.cpp
-        src/crypto/fairplay_sap.cpp
-        src/crypto/srp6a.cpp
-        src/crypto/tlv8_chacha.cpp
+        src/crypto/ed25519_keypair.cpp
+        src/crypto/hash.cpp
     )
     target_include_directories(mirage_receiver_identity_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_compile_options(mirage_receiver_identity_test PRIVATE ${MIRAGE_CXX_FLAGS})
@@ -407,6 +403,7 @@ if(BUILD_TESTING)
         src/protocols/airplay/media_source.cpp
         src/crypto/aes_ctr.cpp
         src/crypto/fairplay_sap.cpp
+        src/crypto/hash.cpp
     )
     target_include_directories(mirage_airplay_media_source_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_compile_options(mirage_airplay_media_source_test PRIVATE ${MIRAGE_CXX_FLAGS})
