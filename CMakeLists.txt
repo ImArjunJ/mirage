@@ -123,6 +123,7 @@ add_executable(mirage
     src/protocols/cast/framing.cpp
     src/protocols/cast/message.cpp
     src/protocols/cast/probe.cpp
+    src/protocols/wfd/control.cpp
     src/protocols/wfd_session.cpp
     src/protocols/receiver_sources.cpp
     src/protocols/airplay/source.cpp
@@ -236,6 +237,16 @@ if(BUILD_TESTING)
     target_link_options(mirage_cast_message_test PRIVATE ${MIRAGE_LINK_FLAGS})
     add_test(NAME cast_message COMMAND mirage_cast_message_test)
 
+    add_executable(mirage_wfd_control_test
+        tests/test_wfd_control.cpp
+        src/protocols/wfd/control.cpp
+        src/protocols/rtsp_message.cpp
+    )
+    target_include_directories(mirage_wfd_control_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_options(mirage_wfd_control_test PRIVATE ${MIRAGE_CXX_FLAGS})
+    target_link_options(mirage_wfd_control_test PRIVATE ${MIRAGE_LINK_FLAGS})
+    add_test(NAME wfd_control COMMAND mirage_wfd_control_test)
+
     add_executable(mirage_receiver_adapter_test
         tests/test_receiver_adapter.cpp
         src/core/receiver_adapter.cpp
@@ -323,5 +334,7 @@ if(BUILD_TESTING)
             COMMAND bash ${CMAKE_SOURCE_DIR}/tests/smoke_raop.sh $<TARGET_FILE:mirage>)
         add_test(NAME cast_probe_smoke
             COMMAND bash ${CMAKE_SOURCE_DIR}/tests/smoke_cast_probe.sh $<TARGET_FILE:mirage>)
+        add_test(NAME wfd_probe_smoke
+            COMMAND bash ${CMAKE_SOURCE_DIR}/tests/smoke_wfd_probe.sh $<TARGET_FILE:mirage>)
     endif()
 endif()

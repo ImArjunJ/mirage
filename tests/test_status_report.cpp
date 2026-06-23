@@ -64,8 +64,8 @@ int main() {
             .port = 7236,
             .enabled = false,
             .experimental = true,
-            .detail = "wfd stub",
-            .capabilities = {.transport = "rtsp"},
+            .detail = "wfd capability listener",
+            .capabilities = {.network_listener = true, .transport = "wfd"},
         },
     };
 

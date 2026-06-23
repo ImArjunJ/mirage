@@ -24,14 +24,15 @@ public:
     result<void> start(receiver_adapter_registry& adapters,
                        discovery::service_publisher& discovery) override {
         static_cast<void>(discovery);
-        auto session = wfd_session::create(ctx_);
+        auto session = wfd_session::bind(ctx_, source_.port);
         if (!session) {
             adapters.mark_error(id(), session.error().message);
             return std::unexpected(session.error());
         }
         session_.emplace(std::move(*session));
-        adapters.mark_running(id());
-        log::diagnostic("Miracast stream setup: mode=stub, listener=none");
+        adapters.mark_listening(id());
+        log::diagnostic("Miracast stream setup: mode=capability_listener, port={}",
+                        source_.port);
         return {};
     }
 

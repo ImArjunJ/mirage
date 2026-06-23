@@ -54,7 +54,7 @@ Common options:
 --no-mdns              disable built-in discovery
 --identity-key <file>  persistent receiver identity
 --cast                 enable experimental Cast probe adapter
---miracast             enable experimental Miracast stub
+--miracast             enable experimental Miracast capability listener
 ```
 
 ## config

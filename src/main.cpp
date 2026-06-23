@@ -55,7 +55,7 @@ void print_help() {
     std::println(stderr, "                      miracast port (default: 7236)");
     std::println(stderr, "  --no-airplay        disable airplay");
     std::println(stderr, "  --cast              enable experimental google cast probe adapter");
-    std::println(stderr, "  --miracast          enable experimental miracast stub");
+    std::println(stderr, "  --miracast          enable experimental miracast capability listener");
     std::println(stderr, "  --no-cast           disable google cast if enabled by config");
     std::println(stderr, "  --no-miracast       disable miracast if enabled by config");
     std::println(stderr, "  --no-mdns           disable built-in mdns broadcaster");
@@ -484,7 +484,7 @@ int handle_status(bool verbose) {
 
     auto is_default_protocol_detail = [](std::string_view detail) {
         return detail == "disabled by config" || detail == "rtsp/raop receiver" ||
-               detail == "cast v2 probe receiver" || detail == "wfd stub (not listening)";
+               detail == "cast v2 probe receiver" || detail == "wfd capability listener";
     };
 
     auto name = extract_string("name");

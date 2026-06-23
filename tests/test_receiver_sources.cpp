@@ -134,7 +134,7 @@ int main() {
                  "airplay detail mismatch");
     ok &= expect(cast->detail == std::string_view("cast v2 control/status receiver"),
                  "cast detail mismatch");
-    ok &= expect(wfd->detail == std::string_view("wfd stub (not listening)"),
+    ok &= expect(wfd->detail == std::string_view("wfd capability listener"),
                  "miracast detail mismatch");
 
     ok &= expect(airplay->validate_source != nullptr, "airplay validator missing");
@@ -154,7 +154,7 @@ int main() {
     ok &= expect(!cast->capabilities.metadata, "cast metadata capability mismatch");
     ok &= expect(cast->capabilities.transport == "cast-v2", "cast transport mismatch");
 
-    ok &= expect(!wfd->capabilities.network_listener, "miracast listener capability mismatch");
+    ok &= expect(wfd->capabilities.network_listener, "miracast listener capability mismatch");
     ok &= expect(!wfd->capabilities.discovery, "miracast discovery capability mismatch");
     ok &= expect_no_media_capabilities(*wfd, "wfd");
 

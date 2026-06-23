@@ -22,10 +22,10 @@ receiver_source_descriptor make_wfd_receiver_source(const config& cfg) {
         .port = cfg.miracast_port,
         .enabled = cfg.enable_miracast,
         .experimental = true,
-        .detail = "wfd stub (not listening)",
+        .detail = "wfd capability listener",
         .capabilities =
             {
-                .network_listener = false,
+                .network_listener = true,
                 .discovery = false,
                 .pairing = false,
                 .media_setup = false,

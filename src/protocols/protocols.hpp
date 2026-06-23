@@ -138,7 +138,7 @@ private:
 };
 class wfd_session {
 public:
-    static result<wfd_session> create(io::io_context& ctx);
+    static result<wfd_session> bind(io::io_context& ctx, uint16_t port);
     io::task<void> run();
     void stop();
     ~wfd_session();
