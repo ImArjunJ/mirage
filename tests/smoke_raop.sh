@@ -88,7 +88,16 @@ for ((i = 1; i <= iterations; ++i)); do
     printf "SETUP rtsp://127.0.0.1/stream RTSP/1.0\r\nCSeq: 2\r\nTransport: RTP/AVP/UDP;unicast;mode=record;control_port=6001;timing_port=6002\r\n\r\n" >&3
     timeout 2 grep -m1 "Transport: RTP/AVP/UDP" <&3 >/dev/null
 
-    printf "TEARDOWN rtsp://127.0.0.1/stream RTSP/1.0\r\nCSeq: 3\r\n\r\n" >&3
+    printf "POST /command RTSP/1.0\r\nCSeq: 3\r\nContent-Length: 0\r\n\r\n" >&3
+    timeout 2 grep -m1 "RTSP/1.0 200 OK" <&3 >/dev/null
+
+    printf "POST /feedback RTSP/1.0\r\nCSeq: 4\r\nContent-Length: 0\r\n\r\n" >&3
+    timeout 2 grep -m1 "RTSP/1.0 200 OK" <&3 >/dev/null
+
+    printf "POST /audioMode RTSP/1.0\r\nCSeq: 5\r\nContent-Length: 0\r\n\r\n" >&3
+    timeout 2 grep -m1 "RTSP/1.0 200 OK" <&3 >/dev/null
+
+    printf "TEARDOWN rtsp://127.0.0.1/stream RTSP/1.0\r\nCSeq: 6\r\n\r\n" >&3
     timeout 2 grep -m1 "RTSP/1.0 200 OK" <&3 >/dev/null
     exec 3<&-
     exec 3>&-

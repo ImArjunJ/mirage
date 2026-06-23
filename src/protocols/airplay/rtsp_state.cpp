@@ -42,6 +42,9 @@ rtsp_action classify_rtsp_action(std::string_view method, std::string_view uri) 
     if (method == "SET_PARAMETER") {
         return rtsp_action::set_parameter;
     }
+    if (method == "POST" && (uri == "/command" || uri == "/feedback" || uri == "/audioMode")) {
+        return rtsp_action::control;
+    }
     return rtsp_action::unknown;
 }
 
@@ -65,6 +68,8 @@ bool rtsp_action_allowed(rtsp_session_state state, rtsp_action action) {
         case rtsp_action::set_parameter:
             return state == rtsp_session_state::announced || state == rtsp_session_state::ready ||
                    state == rtsp_session_state::playing || state == rtsp_session_state::paused;
+        case rtsp_action::control:
+            return true;
         case rtsp_action::announce:
             return state == rtsp_session_state::init || state == rtsp_session_state::announced ||
                    state == rtsp_session_state::ready || state == rtsp_session_state::playing ||
@@ -141,6 +146,8 @@ std::string_view rtsp_action_name(rtsp_action action) {
             return "get_parameter";
         case rtsp_action::set_parameter:
             return "set_parameter";
+        case rtsp_action::control:
+            return "control";
         case rtsp_action::unknown:
             return "unknown";
     }

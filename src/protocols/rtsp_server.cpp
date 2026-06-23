@@ -805,6 +805,10 @@ io::task<result<rtsp_response>> rtsp_session::handle_request(const rtsp_request&
     if (req.method == "SET_PARAMETER") {
         co_return handle_set_parameter(req);
     }
+    if (req.method == "POST" &&
+        (req.uri == "/command" || req.uri == "/feedback" || req.uri == "/audioMode")) {
+        co_return handle_control_post(req);
+    }
     co_return rtsp_response{
         .status_code = 501,
         .status_text = "Not Implemented",
@@ -2242,6 +2246,15 @@ result<rtsp_response> rtsp_session::handle_set_parameter(const rtsp_request& req
     } else {
         mirage::log::debug("SET_PARAMETER unknown content type: {}", content_type);
     }
+    return rtsp_response{
+        .status_code = 200,
+        .status_text = "OK",
+        .headers = {{"CSeq", std::to_string(cseq_)}},
+        .body = {},
+    };
+}
+result<rtsp_response> rtsp_session::handle_control_post(const rtsp_request& req) const {
+    mirage::log::debug("AirPlay control POST {} ({} bytes)", req.uri, req.body.size());
     return rtsp_response{
         .status_code = 200,
         .status_text = "OK",

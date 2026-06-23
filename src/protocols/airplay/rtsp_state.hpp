@@ -30,6 +30,7 @@ enum class rtsp_action : uint8_t {
     teardown,
     get_parameter,
     set_parameter,
+    control,
     unknown
 };
 

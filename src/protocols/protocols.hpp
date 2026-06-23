@@ -55,6 +55,7 @@ private:
     result<rtsp_response> handle_teardown(const rtsp_request& req);
     result<rtsp_response> handle_get_parameter(const rtsp_request& req) const;
     result<rtsp_response> handle_set_parameter(const rtsp_request& req);
+    result<rtsp_response> handle_control_post(const rtsp_request& req) const;
     result<rtsp_response> handle_pause(const rtsp_request& req);
     result<rtsp_response> handle_flush(const rtsp_request& req);
     result<rtsp_response> handle_fp_setup(const rtsp_request& req);

@@ -28,8 +28,12 @@ int main() {
                  "GET /info classification mismatch");
     ok &= expect(classify_rtsp_action("POST", "/fp-setup") == rtsp_action::fairplay_setup,
                  "FairPlay classification mismatch");
-    ok &= expect(classify_rtsp_action("POST", "/command") == rtsp_action::unknown,
-                 "unknown command classification mismatch");
+    ok &= expect(classify_rtsp_action("POST", "/command") == rtsp_action::control,
+                 "command classification mismatch");
+    ok &= expect(classify_rtsp_action("POST", "/feedback") == rtsp_action::control,
+                 "feedback classification mismatch");
+    ok &= expect(classify_rtsp_action("POST", "/audioMode") == rtsp_action::control,
+                 "audio mode classification mismatch");
 
     ok &= expect(allowed(rtsp_session_state::init, rtsp_action::options),
                  "OPTIONS should be allowed before pairing");
@@ -71,10 +75,14 @@ int main() {
                  "stream SETUP should be allowed during playback");
     ok &= expect(allowed(rtsp_session_state::playing, rtsp_action::pause),
                  "PAUSE should be allowed during playback");
+    ok &= expect(allowed(rtsp_session_state::playing, rtsp_action::control),
+                 "control posts should be allowed during playback");
     ok &= expect(allowed(rtsp_session_state::paused, rtsp_action::record),
                  "RECORD should resume from paused state");
     ok &= expect(allowed(rtsp_session_state::teardown, rtsp_action::teardown),
                  "TEARDOWN should be allowed during teardown");
+    ok &= expect(!allowed(rtsp_session_state::teardown, rtsp_action::control),
+                 "control posts should be rejected after teardown");
     ok &= expect(!allowed(rtsp_session_state::teardown, rtsp_action::info),
                  "GET /info should be rejected after teardown");
 
