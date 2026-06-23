@@ -12,18 +12,10 @@
 #include "io/io.hpp"
 #include "media/pipeline.hpp"
 #include "protocols/airplay/media_source.hpp"
+#include "protocols/airplay/rtsp_state.hpp"
 #include "protocols/airplay_protocol.hpp"
 namespace mirage::protocols {
-enum class rtsp_session_state : uint8_t {
-    init,
-    pair_setup,
-    pair_verify,
-    announced,
-    ready,
-    playing,
-    paused,
-    teardown
-};
+using rtsp_session_state = airplay::rtsp_session_state;
 struct rtsp_request {
     std::string method;
     std::string uri;

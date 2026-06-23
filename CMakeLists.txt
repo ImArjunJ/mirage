@@ -131,6 +131,7 @@ add_executable(mirage
     src/protocols/receiver_sources.cpp
     src/protocols/airplay/source.cpp
     src/protocols/airplay/media_source.cpp
+    src/protocols/airplay/rtsp_state.cpp
     src/protocols/airplay/receiver_session.cpp
     src/protocols/cast/source.cpp
     src/protocols/cast/receiver_session.cpp
@@ -204,6 +205,15 @@ if(BUILD_TESTING)
     target_compile_options(mirage_airplay_protocol_test PRIVATE ${MIRAGE_CXX_FLAGS})
     target_link_options(mirage_airplay_protocol_test PRIVATE ${MIRAGE_LINK_FLAGS})
     add_test(NAME airplay_protocol COMMAND mirage_airplay_protocol_test)
+
+    add_executable(mirage_airplay_rtsp_state_test
+        tests/test_airplay_rtsp_state.cpp
+        src/protocols/airplay/rtsp_state.cpp
+    )
+    target_include_directories(mirage_airplay_rtsp_state_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_options(mirage_airplay_rtsp_state_test PRIVATE ${MIRAGE_CXX_FLAGS})
+    target_link_options(mirage_airplay_rtsp_state_test PRIVATE ${MIRAGE_LINK_FLAGS})
+    add_test(NAME airplay_rtsp_state COMMAND mirage_airplay_rtsp_state_test)
 
     add_executable(mirage_cast_probe_test
         tests/test_cast_probe.cpp

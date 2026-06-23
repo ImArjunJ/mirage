@@ -687,6 +687,18 @@ io::task<result<void>> rtsp_session::send_response(const rtsp_response& resp) {
     co_return result<void>{};
 }
 io::task<result<rtsp_response>> rtsp_session::handle_request(const rtsp_request& req) {
+    auto action = airplay::classify_rtsp_action(req.method, req.uri);
+    if (!airplay::rtsp_action_allowed(state_, action)) {
+        mirage::log::warn("Rejecting RTSP {} while session is {}",
+                          airplay::rtsp_action_name(action), airplay::rtsp_state_name(state_));
+        co_return rtsp_response{
+            .status_code = 455,
+            .status_text = "Method Not Valid in This State",
+            .headers = {{"CSeq", std::to_string(cseq_)}},
+            .body = {},
+        };
+    }
+
     if (req.method == "OPTIONS") {
         co_return handle_options(req);
     }
@@ -972,6 +984,7 @@ auto rtsp_session::handle_pair_verify(const rtsp_request& req) -> io::task<resul
         }
         mirage::log::info("Transient pair-verify: signature verified, pairing complete!");
         mirage::log::user("{} connected", socket_.remote_endpoint().addr.to_string());
+        state_ = rtsp_session_state::announced;
         co_return rtsp_response{
             .status_code = 200,
             .status_text = "OK",
@@ -1092,6 +1105,7 @@ static std::optional<uint64_t> extract_bplist_uint(std::span<const std::byte> da
     return std::nullopt;
 }
 result<rtsp_response> rtsp_session::handle_announce(const rtsp_request& req) {
+    state_ = rtsp_session_state::announced;
     std::string sdp(reinterpret_cast<const char*>(req.body.data()), req.body.size());
     if (sdp.find("AppleLossless") != std::string::npos || sdp.find("alac") != std::string::npos) {
         audio_ct_ = 2;
