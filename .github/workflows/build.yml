@@ -65,12 +65,18 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           ./build/mirage --version
+          ./build/mirage paths
           ctest --test-dir build --output-on-failure
+          cmake --install build --prefix install-smoke
+          test -x install-smoke/bin/mirage
       - name: verify (windows)
         if: runner.os == 'Windows'
         run: |
           ./build/Release/mirage.exe --version
+          ./build/Release/mirage.exe paths
           ctest --test-dir build -C Release --output-on-failure
+          cmake --install build --config Release --prefix install-smoke
+          if (!(Test-Path install-smoke/bin/mirage.exe)) { throw "installed mirage.exe missing" }
       - name: upload artifact
         uses: actions/upload-artifact@v7
         with:

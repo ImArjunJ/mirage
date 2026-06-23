@@ -46,6 +46,7 @@ void print_help() {
     std::println(stderr, "  mirage stop                 stop background instance");
     std::println(stderr, "  mirage status               show current state");
     std::println(stderr, "  mirage status -v            show detailed state");
+    std::println(stderr, "  mirage paths                show runtime file paths");
     std::println(stderr, "");
     std::println(stderr, "options:");
     std::println(stderr, "  --name <name>       device name (default: Mirage)");
@@ -239,6 +240,47 @@ mirage::result<mirage::crypto::ed25519_keypair> load_or_create_identity_keypair(
         mirage::log::warn("could not persist receiver identity: {}", private_key.error().message);
     }
     return keypair;
+}
+
+int handle_paths(int argc, char* argv[]) {
+    mirage::config cfg;
+    auto config_path = default_config_file_path();
+    bool explicit_config = false;
+
+    for (int i = 2; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--config" && i + 1 < argc) {
+            config_path = argv[++i];
+            explicit_config = true;
+        } else if (arg == "--help" || arg == "-h") {
+            std::println("usage: mirage paths [--config <file>]");
+            return 0;
+        } else {
+            std::println(stderr, "unknown paths option: {}", arg);
+            return 2;
+        }
+    }
+
+    const bool config_exists = std::filesystem::exists(config_path);
+    if (config_exists) {
+        auto loaded = mirage::config::load_from_file(config_path.string());
+        if (loaded) {
+            cfg = *loaded;
+        } else if (explicit_config) {
+            std::println(stderr, "failed to load config: {}", loaded.error().message);
+            return 1;
+        }
+    } else if (explicit_config) {
+        std::println(stderr, "config file not found: {}", config_path.string());
+        return 1;
+    }
+
+    std::println("config: {}{}", config_path.string(), config_exists ? "" : " (not found)");
+    std::println("state: {}", state_dir().string());
+    std::println("pid: {}", pid_file_path().string());
+    std::println("status: {}", status_file_path().string());
+    std::println("identity key: {}", identity_key_path(cfg).string());
+    return 0;
 }
 
 std::optional<int> read_pid_file() {
@@ -711,6 +753,9 @@ int main(int argc, char* argv[]) {
                 }
             }
             return handle_status(verbose);
+        }
+        if (subcmd == "paths") {
+            return handle_paths(argc, argv);
         }
     }
 

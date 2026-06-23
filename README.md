@@ -7,9 +7,9 @@ AirPlay, Google Cast, and Miracast / Wi-Fi Display. The core owns discovery,
 sessions, media setup, decode, rendering, audio output, diagnostics, and daemon
 state.
 
-Right now, AirPlay is the useful path. Cast has discovery and probe handling,
-but no media channel yet. Miracast is still a stub while the shared receiver
-model settles.
+Right now, AirPlay is the useful path. Cast has discovery, probe, and basic
+status replies. Miracast / WFD has capability negotiation. Cast and WFD media
+streaming are not implemented yet.
 
 ## status
 
@@ -17,7 +17,8 @@ model settles.
   path.
 - Linux is the main development target.
 - Windows builds in CI and has early platform plumbing.
-- macOS, real Cast support, and real Miracast / WFD support are later work.
+- macOS, Cast media streaming, and Miracast / WFD media streaming are later
+  work.
 - DRM / HDCP-protected content is not supported.
 
 ## build
@@ -43,6 +44,7 @@ Useful modes:
 ./build/mirage --debug
 ./build/mirage --daemon
 ./build/mirage status -v
+./build/mirage paths
 ./build/mirage stop
 ```
 
