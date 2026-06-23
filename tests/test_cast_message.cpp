@@ -80,8 +80,7 @@ int main() {
     ok &= expect(pong.size() == 1, "pong response count mismatch");
     if (!pong.empty()) {
         ok &= expect(pong.front().namespace_ == namespace_heartbeat, "pong namespace mismatch");
-        ok &= expect(pong.front().payload_utf8 == "{\"type\":\"PONG\"}",
-                     "pong payload mismatch");
+        ok &= expect(pong.front().payload_utf8 == "{\"type\":\"PONG\"}", "pong payload mismatch");
     }
 
     channel_message connect{
@@ -115,9 +114,9 @@ int main() {
         ok &= expect(contains(availability_response.front().payload_utf8,
                               "\"type\":\"GET_APP_AVAILABILITY\""),
                      "availability response type mismatch");
-        ok &= expect(contains(availability_response.front().payload_utf8,
-                              "\"CC1AD845\":\"APP_AVAILABLE\""),
-                     "default media availability mismatch");
+        ok &= expect(
+            contains(availability_response.front().payload_utf8, "\"CC1AD845\":\"APP_AVAILABLE\""),
+            "default media availability mismatch");
         ok &= expect(contains(availability_response.front().payload_utf8,
                               "\"YouTube\":\"APP_NOT_AVAILABLE\""),
                      "youtube availability mismatch");
@@ -138,14 +137,11 @@ int main() {
     auto& launch_response = launch_result.responses;
     ok &= expect(launch_response.size() == 1, "launch response count mismatch");
     if (!launch_response.empty()) {
-        ok &= expect(contains(launch_response.front().payload_utf8,
-                              "\"type\":\"RECEIVER_STATUS\""),
+        ok &= expect(contains(launch_response.front().payload_utf8, "\"type\":\"RECEIVER_STATUS\""),
                      "launch status type mismatch");
-        ok &= expect(contains(launch_response.front().payload_utf8,
-                              "\"appId\":\"CC1AD845\""),
+        ok &= expect(contains(launch_response.front().payload_utf8, "\"appId\":\"CC1AD845\""),
                      "launch app id mismatch");
-        ok &= expect(contains(launch_response.front().payload_utf8,
-                              "\"transportId\":\"web-1\""),
+        ok &= expect(contains(launch_response.front().payload_utf8, "\"transportId\":\"web-1\""),
                      "launch transport id mismatch");
         ok &= expect(contains(launch_response.front().payload_utf8, "\"requestId\":11"),
                      "launch request id mismatch");
@@ -166,12 +162,12 @@ int main() {
     auto unknown_launch_response = handle_channel_message(unknown_launch, "Living Room", state);
     ok &= expect(unknown_launch_response.size() == 1, "unknown launch response count mismatch");
     if (!unknown_launch_response.empty()) {
-        ok &= expect(contains(unknown_launch_response.front().payload_utf8,
-                              "\"type\":\"LAUNCH_ERROR\""),
-                     "unknown launch error type mismatch");
-        ok &= expect(contains(unknown_launch_response.front().payload_utf8,
-                              "\"reason\":\"NOT_SUPPORTED\""),
-                     "unknown launch error reason mismatch");
+        ok &= expect(
+            contains(unknown_launch_response.front().payload_utf8, "\"type\":\"LAUNCH_ERROR\""),
+            "unknown launch error type mismatch");
+        ok &= expect(
+            contains(unknown_launch_response.front().payload_utf8, "\"reason\":\"NOT_SUPPORTED\""),
+            "unknown launch error reason mismatch");
         ok &= expect(contains(unknown_launch_response.front().payload_utf8, "\"requestId\":17"),
                      "unknown launch request id mismatch");
     }
@@ -191,8 +187,7 @@ int main() {
     auto& volume_response = volume_result.responses;
     ok &= expect(volume_response.size() == 1, "set volume response count mismatch");
     if (!volume_response.empty()) {
-        ok &= expect(contains(volume_response.front().payload_utf8,
-                              "\"type\":\"RECEIVER_STATUS\""),
+        ok &= expect(contains(volume_response.front().payload_utf8, "\"type\":\"RECEIVER_STATUS\""),
                      "set volume status type mismatch");
         ok &= expect(contains(volume_response.front().payload_utf8, "\"requestId\":12"),
                      "set volume request id mismatch");
@@ -244,8 +239,7 @@ int main() {
                      "load request id mismatch");
         ok &= expect(load_result.activity.event == channel_event::media_loaded,
                      "load activity mismatch");
-        ok &= expect(load_result.activity.detail == "cast song",
-                     "load activity detail mismatch");
+        ok &= expect(load_result.activity.detail == "cast song", "load activity detail mismatch");
         ok &= expect(state.accepted_media_loads == 1, "load count mismatch");
         ok &= expect(state.media_session_active, "load state mismatch");
         ok &= expect(load_result.media_status.has_value(), "load media status missing");
@@ -278,12 +272,12 @@ int main() {
     if (!media_status_response.empty()) {
         ok &= expect(media_status_response.front().namespace_ == namespace_media,
                      "media status response namespace mismatch");
-        ok &= expect(contains(media_status_response.front().payload_utf8,
-                              "\"type\":\"MEDIA_STATUS\""),
-                     "media status response type mismatch");
-        ok &= expect(contains(media_status_response.front().payload_utf8,
-                              "\"title\":\"cast song\""),
-                     "media status response body mismatch");
+        ok &= expect(
+            contains(media_status_response.front().payload_utf8, "\"type\":\"MEDIA_STATUS\""),
+            "media status response type mismatch");
+        ok &=
+            expect(contains(media_status_response.front().payload_utf8, "\"title\":\"cast song\""),
+                   "media status response body mismatch");
         ok &= expect(contains(media_status_response.front().payload_utf8, "\"requestId\":14"),
                      "media status request id mismatch");
     }
@@ -301,12 +295,12 @@ int main() {
     auto& media_pause_response = media_pause_result.responses;
     ok &= expect(media_pause_response.size() == 1, "media pause response count mismatch");
     if (!media_pause_response.empty()) {
-        ok &= expect(contains(media_pause_response.front().payload_utf8,
-                              "\"type\":\"MEDIA_STATUS\""),
-                     "media pause status type mismatch");
-        ok &= expect(contains(media_pause_response.front().payload_utf8,
-                              "\"playerState\":\"PAUSED\""),
-                     "media pause state mismatch");
+        ok &=
+            expect(contains(media_pause_response.front().payload_utf8, "\"type\":\"MEDIA_STATUS\""),
+                   "media pause status type mismatch");
+        ok &= expect(
+            contains(media_pause_response.front().payload_utf8, "\"playerState\":\"PAUSED\""),
+            "media pause state mismatch");
         ok &= expect(contains(media_pause_response.front().payload_utf8, "\"requestId\":15"),
                      "media pause request id mismatch");
         ok &= expect(media_pause_result.activity.event == channel_event::media_playback_updated,
@@ -320,16 +314,16 @@ int main() {
         .destination_id = "receiver-0",
         .namespace_ = std::string(namespace_media),
         .payload_type = channel_payload_type::string_payload,
-        .payload_utf8 = "{\"type\":\"SEEK\",\"requestId\":16,\"mediaSessionId\":1,"
-                        "\"currentTime\":40.0}",
+        .payload_utf8 =
+            "{\"type\":\"SEEK\",\"requestId\":16,\"mediaSessionId\":1,"
+            "\"currentTime\":40.0}",
         .payload_binary = {},
     };
     auto media_seek_result = handle_channel_message_result(media_seek, "Living Room", state);
     auto& media_seek_response = media_seek_result.responses;
     ok &= expect(media_seek_response.size() == 1, "media seek response count mismatch");
     if (!media_seek_response.empty()) {
-        ok &= expect(contains(media_seek_response.front().payload_utf8,
-                              "\"currentTime\":40."),
+        ok &= expect(contains(media_seek_response.front().payload_utf8, "\"currentTime\":40."),
                      "media seek current time mismatch");
         ok &= expect(contains(media_seek_response.front().payload_utf8, "\"requestId\":16"),
                      "media seek request id mismatch");
@@ -349,14 +343,14 @@ int main() {
         .payload_utf8 = "{\"type\":\"PLAY\",\"requestId\":16,\"mediaSessionId\":999}",
         .payload_binary = {},
     };
-    auto media_wrong_result = handle_channel_message_result(media_wrong_session, "Living Room",
-                                                           state);
+    auto media_wrong_result =
+        handle_channel_message_result(media_wrong_session, "Living Room", state);
     auto& media_wrong_response = media_wrong_result.responses;
     ok &= expect(media_wrong_response.size() == 1, "wrong session response count mismatch");
     if (!media_wrong_response.empty()) {
-        ok &= expect(contains(media_wrong_response.front().payload_utf8,
-                              "\"type\":\"INVALID_REQUEST\""),
-                     "wrong session invalid request type mismatch");
+        ok &= expect(
+            contains(media_wrong_response.front().payload_utf8, "\"type\":\"INVALID_REQUEST\""),
+            "wrong session invalid request type mismatch");
         ok &= expect(contains(media_wrong_response.front().payload_utf8,
                               "\"reason\":\"INVALID_MEDIA_SESSION_ID\""),
                      "wrong session invalid reason mismatch");
@@ -365,33 +359,61 @@ int main() {
         ok &= expect(state.rejected_media_commands == 1, "wrong session rejection count");
     }
 
+    channel_message media_wrong_stop{
+        .protocol_version = 0,
+        .source_id = "sender-9",
+        .destination_id = "receiver-0",
+        .namespace_ = std::string(namespace_media),
+        .payload_type = channel_payload_type::string_payload,
+        .payload_utf8 = "{\"type\":\"STOP\",\"requestId\":17,\"mediaSessionId\":999}",
+        .payload_binary = {},
+    };
+    auto media_wrong_stop_result =
+        handle_channel_message_result(media_wrong_stop, "Living Room", state);
+    auto& media_wrong_stop_response = media_wrong_stop_result.responses;
+    ok &=
+        expect(media_wrong_stop_response.size() == 1, "wrong stop session response count mismatch");
+    if (!media_wrong_stop_response.empty()) {
+        ok &= expect(contains(media_wrong_stop_response.front().payload_utf8,
+                              "\"type\":\"INVALID_REQUEST\""),
+                     "wrong stop session invalid request type mismatch");
+        ok &= expect(contains(media_wrong_stop_response.front().payload_utf8,
+                              "\"reason\":\"INVALID_MEDIA_SESSION_ID\""),
+                     "wrong stop session invalid reason mismatch");
+        ok &=
+            expect(media_wrong_stop_result.activity.event == channel_event::media_command_rejected,
+                   "wrong stop session activity mismatch");
+        ok &= expect(state.rejected_media_commands == 2, "wrong stop session rejection count");
+        ok &=
+            expect(state.media_session_active, "wrong stop session should not clear active media");
+    }
+
     channel_message media_stop{
         .protocol_version = 0,
         .source_id = "sender-8",
         .destination_id = "receiver-0",
         .namespace_ = std::string(namespace_media),
         .payload_type = channel_payload_type::string_payload,
-        .payload_utf8 = "{\"type\":\"STOP\",\"requestId\":17,\"mediaSessionId\":1}",
+        .payload_utf8 = "{\"type\":\"STOP\",\"requestId\":18,\"mediaSessionId\":1}",
         .payload_binary = {},
     };
     auto media_stop_result = handle_channel_message_result(media_stop, "Living Room", state);
     auto& media_stop_response = media_stop_result.responses;
     ok &= expect(media_stop_response.size() == 1, "media stop response count mismatch");
     if (!media_stop_response.empty()) {
-        ok &= expect(contains(media_stop_response.front().payload_utf8,
-                              "\"type\":\"MEDIA_STATUS\""),
-                     "media stop status type mismatch");
+        ok &=
+            expect(contains(media_stop_response.front().payload_utf8, "\"type\":\"MEDIA_STATUS\""),
+                   "media stop status type mismatch");
         ok &= expect(contains(media_stop_response.front().payload_utf8, "\"status\":[]"),
                      "media stop status body mismatch");
-        ok &= expect(contains(media_stop_response.front().payload_utf8, "\"requestId\":17"),
+        ok &= expect(contains(media_stop_response.front().payload_utf8, "\"requestId\":18"),
                      "media stop request id mismatch");
         ok &= expect(media_stop_result.activity.event == channel_event::media_stopped,
                      "media stop activity mismatch");
         ok &= expect(!state.media_session_active, "media stop state mismatch");
         ok &= expect(media_stop_result.media_status.has_value(), "media stop status missing");
         if (media_stop_result.media_status) {
-            ok &= expect(!media_stop_result.media_status->active,
-                         "media stop media status active");
+            ok &= expect(!media_stop_result.media_status->active, "media stop media status active");
         }
     }
 
@@ -402,19 +424,18 @@ int main() {
         .namespace_ = std::string(namespace_receiver),
         .payload_type = channel_payload_type::string_payload,
         .payload_utf8 =
-            "{\"type\":\"STOP\",\"requestId\":18,\"sessionId\":\"default-media-session\"}",
+            "{\"type\":\"STOP\",\"requestId\":19,\"sessionId\":\"default-media-session\"}",
         .payload_binary = {},
     };
     auto stop_result = handle_channel_message_result(stop, "Living Room", state);
     auto& stop_response = stop_result.responses;
     ok &= expect(stop_response.size() == 1, "receiver stop response count mismatch");
     if (!stop_response.empty()) {
-        ok &= expect(contains(stop_response.front().payload_utf8,
-                              "\"type\":\"RECEIVER_STATUS\""),
+        ok &= expect(contains(stop_response.front().payload_utf8, "\"type\":\"RECEIVER_STATUS\""),
                      "receiver stop status type mismatch");
         ok &= expect(contains(stop_response.front().payload_utf8, "\"applications\":[]"),
                      "receiver stop app state mismatch");
-        ok &= expect(contains(stop_response.front().payload_utf8, "\"requestId\":18"),
+        ok &= expect(contains(stop_response.front().payload_utf8, "\"requestId\":19"),
                      "receiver stop request id mismatch");
         ok &= expect(stop_result.activity.event == channel_event::default_media_stopped,
                      "receiver stop activity mismatch");

@@ -1,6 +1,6 @@
-#include <cstdint>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <format>
 #include <memory>
 #include <span>
@@ -159,10 +159,8 @@ io::task<bool> write_cast_frame(cast::tls_channel& socket, std::span<const std::
 
 template <typename Stream>
 io::task<void> handle_ready_frames(Stream& socket, cast::channel_frame_parser& parser,
-                                   std::string_view device_name,
-                                   cast::channel_session_state& state,
-                                   receiver_session_observer* observer,
-                                   uint64_t client_status_id) {
+                                   std::string_view device_name, cast::channel_session_state& state,
+                                   receiver_session_observer* observer, uint64_t client_status_id) {
     while (auto frame = parser.next_frame()) {
         auto message = cast::parse_channel_message(*frame);
         if (!message) {
@@ -201,10 +199,8 @@ io::task<void> handle_ready_frames(Stream& socket, cast::channel_frame_parser& p
 }
 
 io::task<void> handle_cast_channel(io::tcp_stream& socket, std::string_view first_packet,
-                                   std::string_view device_name,
-                                   cast::channel_session_state& state,
-                                   receiver_session_observer* observer,
-                                   uint64_t client_status_id) {
+                                   std::string_view device_name, cast::channel_session_state& state,
+                                   receiver_session_observer* observer, uint64_t client_status_id) {
     cast::channel_frame_parser parser;
     auto appended = parser.append(byte_view(first_packet));
     if (!appended) {
@@ -230,8 +226,7 @@ io::task<void> handle_cast_channel(io::tcp_stream& socket, std::string_view firs
 }
 
 io::task<void> handle_cast_tls_channel(io::tcp_stream socket, std::string_view first_packet,
-                                       std::string device_name,
-                                       receiver_session_observer* observer,
+                                       std::string device_name, receiver_session_observer* observer,
                                        uint64_t client_status_id) {
     auto accepted = co_await cast::tls_channel::accept(std::move(socket), byte_view(first_packet));
     if (!accepted) {
@@ -240,7 +235,7 @@ io::task<void> handle_cast_tls_channel(io::tcp_stream socket, std::string_view f
     }
 
     auto tls = std::move(*accepted);
-    mirage::log::debug("cast tls channel: control/status enabled");
+    mirage::log::debug("cast tls channel: app/media control enabled");
 
     cast::channel_frame_parser parser;
     cast::channel_session_state state;
@@ -278,14 +273,13 @@ io::task<void> handle_cast_connection(io::tcp_stream socket, std::string device_
                 mirage::log::debug("cast probe: answered HTTP request");
                 break;
             case cast::probe_kind::tls_client_hello:
-                mirage::log::debug(
-                    "cast tls channel: client connected, media channel is not implemented");
+                mirage::log::debug("cast tls channel: client connected, app/media control enabled");
                 co_await handle_cast_tls_channel(std::move(socket), data, device_name, observer,
                                                  client_status_id);
                 co_return;
             case cast::probe_kind::channel_frame:
                 mirage::log::debug(
-                    "cast channel: plaintext frame stream connected, control/status enabled");
+                    "cast channel: plaintext frame stream connected, app/media control enabled");
                 {
                     cast::channel_session_state state;
                     co_await handle_cast_channel(socket, data, device_name, state, observer,
@@ -297,9 +291,8 @@ io::task<void> handle_cast_connection(io::tcp_stream socket, std::string device_
                 break;
         }
         if (!response.response.empty()) {
-            co_await socket.async_write(
-                std::as_bytes(std::span<const char>(response.response.data(),
-                                                    response.response.size())));
+            co_await socket.async_write(std::as_bytes(
+                std::span<const char>(response.response.data(), response.response.size())));
         }
     } catch (const std::system_error& e) {
         mirage::log::debug("cast probe connection closed: {}", e.what());
