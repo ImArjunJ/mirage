@@ -875,6 +875,7 @@ int main(int argc, char* argv[]) {
             std::println(stderr, "  this is unusual -- check that openssl is installed correctly.");
             return 1;
         }
+        auto receiver_public_key = keypair->public_key();
         auto interfaces = mirage::discovery::enumerate_interfaces();
         if (!interfaces) {
             std::println(stderr, "no network interfaces found.");
@@ -917,6 +918,7 @@ int main(int argc, char* argv[]) {
         const mirage::receiver_source_runtime receiver_runtime{
             .io_context = &ctx,
             .receiver_identity = &*keypair,
+            .receiver_public_key = &receiver_public_key,
             .device_name = cfg.device_name,
             .mac_address = mac_address,
         };

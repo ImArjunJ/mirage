@@ -25,10 +25,12 @@ std::unique_ptr<receiver_session> make_airplay_receiver_session(io::io_context& 
 
 std::unique_ptr<receiver_session> make_cast_receiver_session(io::io_context& ctx,
                                                              receiver_source_descriptor source,
-                                                             std::string device_name) {
+                                                             std::string device_name,
+                                                             protocol_receiver_identity identity) {
     static_cast<void>(ctx);
     static_cast<void>(source);
     static_cast<void>(device_name);
+    static_cast<void>(identity);
     return {};
 }
 

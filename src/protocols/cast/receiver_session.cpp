@@ -13,11 +13,11 @@ namespace {
 class cast_receiver_session final : public receiver_session {
 public:
     cast_receiver_session(io::io_context& ctx, receiver_source_descriptor source,
-                          std::string device_name)
+                          std::string device_name, protocol_receiver_identity identity)
         : ctx_(ctx),
           source_(source),
           device_name_(std::move(device_name)),
-          uuid_(generate_uuid()) {}
+          identity_(std::move(identity)) {}
 
     [[nodiscard]] protocol id() const override { return source_.id; }
     [[nodiscard]] uint16_t port() const override { return source_.port; }
@@ -62,20 +62,20 @@ private:
             return;
         }
 
-        auto service = discovery::create_cast_service(device_name_, source_.port, uuid_);
+        auto service = discovery::create_cast_service(device_name_, source_.port, identity_);
         if (auto published = publisher.publish(id(), std::move(service)); !published) {
             log::error("failed to register cast service: {}", published.error().message);
             adapters.set_detail(id(), published.error().message);
             return;
         }
         adapters.mark_advertised(id());
-        log::info("cast probe advertised on port {} (uuid: {})", source_.port, uuid_);
+        log::info("cast probe advertised on port {} (uuid: {})", source_.port, identity_.uuid);
     }
 
     io::io_context& ctx_;
     receiver_source_descriptor source_;
     std::string device_name_;
-    std::string uuid_;
+    protocol_receiver_identity identity_;
     std::optional<cast_receiver> receiver_;
 };
 
@@ -83,8 +83,10 @@ private:
 
 std::unique_ptr<receiver_session> make_cast_receiver_session(io::io_context& ctx,
                                                              receiver_source_descriptor source,
-                                                             std::string device_name) {
-    return std::make_unique<cast_receiver_session>(ctx, source, std::move(device_name));
+                                                             std::string device_name,
+                                                             protocol_receiver_identity identity) {
+    return std::make_unique<cast_receiver_session>(ctx, source, std::move(device_name),
+                                                   std::move(identity));
 }
 
 }  // namespace mirage::protocols

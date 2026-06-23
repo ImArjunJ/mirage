@@ -98,6 +98,7 @@ add_executable(mirage
     src/main.cpp
     src/core/error.cpp
     src/core/config.cpp
+    src/core/receiver_identity.cpp
     src/core/receiver_adapter.cpp
     src/core/receiver_source.cpp
     src/crypto/fairplay_pairing.cpp
@@ -106,6 +107,7 @@ add_executable(mirage
     src/crypto/aes_ctr.cpp
     src/crypto/tlv8_chacha.cpp
     src/discovery/mdns_broadcaster.cpp
+    src/discovery/service_records.cpp
     src/discovery/interface_enum.cpp
     src/media/local_media_sink.cpp
     src/media/vaapi_decoder.cpp
@@ -214,6 +216,7 @@ if(BUILD_TESTING)
     add_executable(mirage_receiver_sources_test
         tests/test_receiver_sources.cpp
         src/protocols/receiver_sources.cpp
+        src/core/receiver_identity.cpp
         src/protocols/airplay/source.cpp
         src/protocols/cast/source.cpp
         src/protocols/wfd/source.cpp
@@ -228,6 +231,20 @@ if(BUILD_TESTING)
     target_link_options(mirage_receiver_sources_test PRIVATE ${MIRAGE_LINK_FLAGS})
     target_link_libraries(mirage_receiver_sources_test PRIVATE OpenSSL::Crypto)
     add_test(NAME receiver_sources COMMAND mirage_receiver_sources_test)
+
+    add_executable(mirage_receiver_identity_test
+        tests/test_receiver_identity.cpp
+        src/core/receiver_identity.cpp
+        src/core/error.cpp
+        src/discovery/service_records.cpp
+        src/crypto/aes_ctr.cpp
+        src/crypto/fairplay_sap.cpp
+    )
+    target_include_directories(mirage_receiver_identity_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_options(mirage_receiver_identity_test PRIVATE ${MIRAGE_CXX_FLAGS})
+    target_link_options(mirage_receiver_identity_test PRIVATE ${MIRAGE_LINK_FLAGS})
+    target_link_libraries(mirage_receiver_identity_test PRIVATE OpenSSL::Crypto)
+    add_test(NAME receiver_identity COMMAND mirage_receiver_identity_test)
 
     add_executable(mirage_receiver_session_test
         tests/test_receiver_session.cpp
@@ -261,5 +278,7 @@ if(BUILD_TESTING)
     if(UNIX)
         add_test(NAME raop_smoke
             COMMAND bash ${CMAKE_SOURCE_DIR}/tests/smoke_raop.sh $<TARGET_FILE:mirage>)
+        add_test(NAME cast_probe_smoke
+            COMMAND bash ${CMAKE_SOURCE_DIR}/tests/smoke_cast_probe.sh $<TARGET_FILE:mirage>)
     endif()
 endif()

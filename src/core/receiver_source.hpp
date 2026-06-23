@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -26,6 +27,7 @@ struct receiver_source_descriptor;
 struct receiver_source_runtime {
     io::io_context* io_context = nullptr;
     const crypto::ed25519_keypair* receiver_identity = nullptr;
+    const std::array<std::byte, 32>* receiver_public_key = nullptr;
     std::string_view device_name;
     std::string_view mac_address;
 };

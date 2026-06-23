@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 
+#include "core/receiver_identity.hpp"
 #include "core/receiver_session.hpp"
 #include "core/receiver_source.hpp"
 #include "crypto/crypto.hpp"
@@ -18,7 +19,8 @@ std::unique_ptr<receiver_session> make_airplay_receiver_session(io::io_context& 
 
 std::unique_ptr<receiver_session> make_cast_receiver_session(io::io_context& ctx,
                                                              receiver_source_descriptor source,
-                                                             std::string device_name);
+                                                             std::string device_name,
+                                                             protocol_receiver_identity identity);
 
 std::unique_ptr<receiver_session> make_wfd_receiver_session(io::io_context& ctx,
                                                             receiver_source_descriptor source);

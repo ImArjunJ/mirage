@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "core/core.hpp"
+#include "core/receiver_identity.hpp"
 #include "io/io.hpp"
 namespace mirage::discovery {
 struct service_record {
@@ -99,5 +100,6 @@ service_record create_airplay_service(std::string_view name, uint16_t port,
                                       std::string_view mac_address);
 service_record create_raop_service(std::string_view name, uint16_t port,
                                    std::string_view mac_address);
-service_record create_cast_service(std::string_view name, uint16_t port, std::string_view uuid);
+service_record create_cast_service(std::string_view name, uint16_t port,
+                                   const protocol_receiver_identity& identity);
 }  // namespace mirage::discovery

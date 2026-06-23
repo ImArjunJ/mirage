@@ -1,6 +1,8 @@
 #include <memory>
 #include <string>
+#include <utility>
 
+#include "core/receiver_identity.hpp"
 #include "protocols/receiver_sessions.hpp"
 #include "protocols/receiver_sources.hpp"
 
@@ -12,8 +14,12 @@ result<std::unique_ptr<receiver_session>> create_cast_session(
     if (runtime.io_context == nullptr) {
         return std::unexpected(mirage_error::session("receiver runtime is missing an event loop"));
     }
-    return make_cast_receiver_session(*runtime.io_context, source,
-                                      std::string(runtime.device_name));
+    if (runtime.receiver_public_key == nullptr) {
+        return std::unexpected(mirage_error::crypto("cast receiver identity is not available"));
+    }
+    auto identity = derive_protocol_identity(*runtime.receiver_public_key, "cast-v2");
+    return make_cast_receiver_session(*runtime.io_context, source, std::string(runtime.device_name),
+                                      std::move(identity));
 }
 
 }  // namespace
