@@ -11,7 +11,7 @@ adapters, not full media receivers yet.
 ## status
 
 - airplay mirroring and audio work on the tested ios path
-- cast has discovery, probe, tls control, and media status replies
+- cast has discovery, probe, tls control, and default media app state
 - miracast / wfd has capability negotiation
 - linux is the main runtime target
 - windows builds in ci; runtime support is early

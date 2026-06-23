@@ -107,14 +107,16 @@ int main() {
             "\"appId\":[\"CC1AD845\",\"YouTube\"]}",
         .payload_binary = {},
     };
-    auto availability_response = handle_channel_message(availability, "Living Room");
+    channel_session_state state;
+
+    auto availability_response = handle_channel_message(availability, "Living Room", state);
     ok &= expect(availability_response.size() == 1, "availability response count mismatch");
     if (!availability_response.empty()) {
         ok &= expect(contains(availability_response.front().payload_utf8,
                               "\"type\":\"GET_APP_AVAILABILITY\""),
                      "availability response type mismatch");
         ok &= expect(contains(availability_response.front().payload_utf8,
-                              "\"CC1AD845\":\"APP_NOT_AVAILABLE\""),
+                              "\"CC1AD845\":\"APP_AVAILABLE\""),
                      "default media availability mismatch");
         ok &= expect(contains(availability_response.front().payload_utf8,
                               "\"YouTube\":\"APP_NOT_AVAILABLE\""),
@@ -132,16 +134,42 @@ int main() {
         .payload_utf8 = "{\"type\":\"LAUNCH\",\"requestId\":11,\"appId\":\"CC1AD845\"}",
         .payload_binary = {},
     };
-    auto launch_response = handle_channel_message(launch, "Living Room");
+    auto launch_response = handle_channel_message(launch, "Living Room", state);
     ok &= expect(launch_response.size() == 1, "launch response count mismatch");
     if (!launch_response.empty()) {
-        ok &= expect(contains(launch_response.front().payload_utf8, "\"type\":\"LAUNCH_ERROR\""),
-                     "launch error type mismatch");
         ok &= expect(contains(launch_response.front().payload_utf8,
-                              "\"reason\":\"NOT_SUPPORTED\""),
-                     "launch error reason mismatch");
+                              "\"type\":\"RECEIVER_STATUS\""),
+                     "launch status type mismatch");
+        ok &= expect(contains(launch_response.front().payload_utf8,
+                              "\"appId\":\"CC1AD845\""),
+                     "launch app id mismatch");
+        ok &= expect(contains(launch_response.front().payload_utf8,
+                              "\"transportId\":\"web-1\""),
+                     "launch transport id mismatch");
         ok &= expect(contains(launch_response.front().payload_utf8, "\"requestId\":11"),
                      "launch request id mismatch");
+    }
+
+    channel_message unknown_launch{
+        .protocol_version = 0,
+        .source_id = "sender-4",
+        .destination_id = "receiver-0",
+        .namespace_ = std::string(namespace_receiver),
+        .payload_type = channel_payload_type::string_payload,
+        .payload_utf8 = "{\"type\":\"LAUNCH\",\"requestId\":17,\"appId\":\"YouTube\"}",
+        .payload_binary = {},
+    };
+    auto unknown_launch_response = handle_channel_message(unknown_launch, "Living Room", state);
+    ok &= expect(unknown_launch_response.size() == 1, "unknown launch response count mismatch");
+    if (!unknown_launch_response.empty()) {
+        ok &= expect(contains(unknown_launch_response.front().payload_utf8,
+                              "\"type\":\"LAUNCH_ERROR\""),
+                     "unknown launch error type mismatch");
+        ok &= expect(contains(unknown_launch_response.front().payload_utf8,
+                              "\"reason\":\"NOT_SUPPORTED\""),
+                     "unknown launch error reason mismatch");
+        ok &= expect(contains(unknown_launch_response.front().payload_utf8, "\"requestId\":17"),
+                     "unknown launch request id mismatch");
     }
 
     channel_message set_volume{
@@ -153,7 +181,7 @@ int main() {
         .payload_utf8 = "{\"type\":\"SET_VOLUME\",\"requestId\":12}",
         .payload_binary = {},
     };
-    auto volume_response = handle_channel_message(set_volume, "Living Room");
+    auto volume_response = handle_channel_message(set_volume, "Living Room", state);
     ok &= expect(volume_response.size() == 1, "set volume response count mismatch");
     if (!volume_response.empty()) {
         ok &= expect(contains(volume_response.front().payload_utf8,
@@ -161,6 +189,8 @@ int main() {
                      "set volume status type mismatch");
         ok &= expect(contains(volume_response.front().payload_utf8, "\"requestId\":12"),
                      "set volume request id mismatch");
+        ok &= expect(contains(volume_response.front().payload_utf8, "\"appId\":\"CC1AD845\""),
+                     "set volume app state mismatch");
     }
 
     channel_message load{
@@ -172,7 +202,7 @@ int main() {
         .payload_utf8 = "{\"type\":\"LOAD\",\"requestId\":13}",
         .payload_binary = {},
     };
-    auto load_response = handle_channel_message(load, "Living Room");
+    auto load_response = handle_channel_message(load, "Living Room", state);
     ok &= expect(load_response.size() == 1, "load response count mismatch");
     if (!load_response.empty()) {
         ok &= expect(load_response.front().namespace_ == namespace_media,
@@ -180,7 +210,7 @@ int main() {
         ok &= expect(contains(load_response.front().payload_utf8, "\"type\":\"LOAD_FAILED\""),
                      "load failure type mismatch");
         ok &= expect(contains(load_response.front().payload_utf8,
-                              "\"reason\":\"RECEIVER_APP_NOT_RUNNING\""),
+                              "\"reason\":\"MEDIA_NOT_SUPPORTED\""),
                      "load failure reason mismatch");
         ok &= expect(contains(load_response.front().payload_utf8, "\"requestId\":13"),
                      "load request id mismatch");
@@ -250,6 +280,28 @@ int main() {
                      "media play invalid reason mismatch");
         ok &= expect(contains(media_play_response.front().payload_utf8, "\"requestId\":16"),
                      "media play request id mismatch");
+    }
+
+    channel_message stop{
+        .protocol_version = 0,
+        .source_id = "sender-10",
+        .destination_id = "receiver-0",
+        .namespace_ = std::string(namespace_receiver),
+        .payload_type = channel_payload_type::string_payload,
+        .payload_utf8 =
+            "{\"type\":\"STOP\",\"requestId\":18,\"sessionId\":\"default-media-session\"}",
+        .payload_binary = {},
+    };
+    auto stop_response = handle_channel_message(stop, "Living Room", state);
+    ok &= expect(stop_response.size() == 1, "receiver stop response count mismatch");
+    if (!stop_response.empty()) {
+        ok &= expect(contains(stop_response.front().payload_utf8,
+                              "\"type\":\"RECEIVER_STATUS\""),
+                     "receiver stop status type mismatch");
+        ok &= expect(contains(stop_response.front().payload_utf8, "\"applications\":[]"),
+                     "receiver stop app state mismatch");
+        ok &= expect(contains(stop_response.front().payload_utf8, "\"requestId\":18"),
+                     "receiver stop request id mismatch");
     }
 
     std::vector<std::byte> invalid_varint(12, std::byte{0x80});

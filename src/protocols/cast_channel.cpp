@@ -68,7 +68,8 @@ io::task<bool> write_cast_frame(cast::tls_channel& socket, std::span<const std::
 
 template <typename Stream>
 io::task<void> handle_ready_frames(Stream& socket, cast::channel_frame_parser& parser,
-                                   std::string_view device_name) {
+                                   std::string_view device_name,
+                                   cast::channel_session_state& state) {
     while (auto frame = parser.next_frame()) {
         auto message = cast::parse_channel_message(*frame);
         if (!message) {
@@ -79,7 +80,7 @@ io::task<void> handle_ready_frames(Stream& socket, cast::channel_frame_parser& p
         mirage::log::debug("cast channel: {} -> {} namespace={} payload={} bytes",
                            message->source_id, message->destination_id, message->namespace_,
                            message->payload_utf8.size() + message->payload_binary.size());
-        auto responses = cast::handle_channel_message(*message, device_name);
+        auto responses = cast::handle_channel_message(*message, device_name, state);
         for (const auto& response : responses) {
             auto payload = cast::serialize_channel_message(response);
             if (!payload) {
@@ -103,14 +104,15 @@ io::task<void> handle_ready_frames(Stream& socket, cast::channel_frame_parser& p
 }
 
 io::task<void> handle_cast_channel(io::tcp_stream& socket, std::string_view first_packet,
-                                   std::string_view device_name) {
+                                   std::string_view device_name,
+                                   cast::channel_session_state& state) {
     cast::channel_frame_parser parser;
     auto appended = parser.append(byte_view(first_packet));
     if (!appended) {
         mirage::log::debug("cast channel: rejected frame prefix: {}", appended.error().message);
         co_return;
     }
-    co_await handle_ready_frames(socket, parser, device_name);
+    co_await handle_ready_frames(socket, parser, device_name, state);
 
     std::array<std::byte, 2048> buffer{};
     while (socket.is_open()) {
@@ -123,7 +125,7 @@ io::task<void> handle_cast_channel(io::tcp_stream& socket, std::string_view firs
             mirage::log::debug("cast channel: rejected frame: {}", appended.error().message);
             co_return;
         }
-        co_await handle_ready_frames(socket, parser, device_name);
+        co_await handle_ready_frames(socket, parser, device_name, state);
     }
 }
 
@@ -139,6 +141,7 @@ io::task<void> handle_cast_tls_channel(io::tcp_stream socket, std::string_view f
     mirage::log::debug("cast tls channel: control/status enabled");
 
     cast::channel_frame_parser parser;
+    cast::channel_session_state state;
     std::array<std::byte, 2048> buffer{};
     while (tls.is_open()) {
         auto n = co_await tls.async_read(buffer);
@@ -154,7 +157,7 @@ io::task<void> handle_cast_tls_channel(io::tcp_stream socket, std::string_view f
             mirage::log::debug("cast tls channel: rejected frame: {}", appended.error().message);
             co_return;
         }
-        co_await handle_ready_frames(tls, parser, device_name);
+        co_await handle_ready_frames(tls, parser, device_name, state);
     }
 }
 
@@ -178,7 +181,10 @@ io::task<void> handle_cast_connection(io::tcp_stream socket, std::string device_
             case cast::probe_kind::channel_frame:
                 mirage::log::debug(
                     "cast channel: plaintext frame stream connected, control/status enabled");
-                co_await handle_cast_channel(socket, data, device_name);
+                {
+                    cast::channel_session_state state;
+                    co_await handle_cast_channel(socket, data, device_name, state);
+                }
                 break;
             case cast::probe_kind::unsupported:
                 mirage::log::debug("cast probe: unsupported first packet");

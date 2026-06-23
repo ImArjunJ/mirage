@@ -268,15 +268,18 @@ channel_message make_string_message(std::string_view destination_id, std::string
     };
 }
 
-std::string launch_error_payload(std::optional<int64_t> request_id) {
-    return std::format("{{\"type\":\"LAUNCH_ERROR\",\"reason\":\"NOT_SUPPORTED\"{}}}",
-                       request_id_fragment(request_id));
+bool is_default_media_app(std::string_view app_id) {
+    return app_id == default_media_app_id;
 }
 
-std::string load_failed_payload(std::optional<int64_t> request_id) {
-    return std::format(
-        "{{\"type\":\"LOAD_FAILED\",\"reason\":\"RECEIVER_APP_NOT_RUNNING\"{}}}",
-        request_id_fragment(request_id));
+std::string launch_error_payload(std::optional<int64_t> request_id, std::string_view reason) {
+    return std::format("{{\"type\":\"LAUNCH_ERROR\",\"reason\":\"{}\"{}}}",
+                       json_escape(reason), request_id_fragment(request_id));
+}
+
+std::string load_failed_payload(std::optional<int64_t> request_id, std::string_view reason) {
+    return std::format("{{\"type\":\"LOAD_FAILED\",\"reason\":\"{}\"{}}}", json_escape(reason),
+                       request_id_fragment(request_id));
 }
 
 std::string media_status_payload(std::optional<int64_t> request_id) {
@@ -299,7 +302,9 @@ std::string app_availability_payload(std::span<const std::string> app_ids,
         if (i != 0) {
             body += ',';
         }
-        body += std::format("\"{}\":\"APP_NOT_AVAILABLE\"", json_escape(app_ids[i]));
+        body += std::format("\"{}\":\"{}\"", json_escape(app_ids[i]),
+                            is_default_media_app(app_ids[i]) ? "APP_AVAILABLE"
+                                                             : "APP_NOT_AVAILABLE");
     }
     body += "}";
     body += request_id_fragment(request_id);
@@ -427,13 +432,31 @@ result<std::vector<std::byte>> serialize_channel_message(const channel_message& 
 
 std::string receiver_status_payload(std::string_view device_name,
                                     std::optional<int64_t> request_id) {
+    channel_session_state state;
+    return receiver_status_payload(device_name, request_id, state);
+}
+
+std::string receiver_status_payload(std::string_view device_name,
+                                    std::optional<int64_t> request_id,
+                                    const channel_session_state& state) {
+    std::string applications = "[]";
+    if (state.default_media_running) {
+        applications =
+            std::format("[{{\"appId\":\"{}\","
+                        "\"displayName\":\"Default Media Receiver\","
+                        "\"namespaces\":[{{\"name\":\"{}\"}}],"
+                        "\"sessionId\":\"default-media-session\","
+                        "\"statusText\":\"ready\","
+                        "\"transportId\":\"{}\"}}]",
+                        default_media_app_id, namespace_media, default_media_transport_id);
+    }
     auto body = std::format(
         "{{\"type\":\"RECEIVER_STATUS\","
-        "\"status\":{{\"applications\":[],"
+        "\"status\":{{\"applications\":{},"
         "\"volume\":{{\"controlType\":\"attenuation\",\"level\":1.0,\"muted\":false}},"
         "\"isActiveInput\":true,"
         "\"friendlyName\":\"{}\"}}",
-        json_escape(device_name));
+        applications, json_escape(device_name));
     body += request_id_fragment(request_id);
     body += "}";
     return body;
@@ -441,6 +464,13 @@ std::string receiver_status_payload(std::string_view device_name,
 
 std::vector<channel_message> handle_channel_message(const channel_message& message,
                                                     std::string_view device_name) {
+    channel_session_state state;
+    return handle_channel_message(message, device_name, state);
+}
+
+std::vector<channel_message> handle_channel_message(const channel_message& message,
+                                                    std::string_view device_name,
+                                                    channel_session_state& state) {
     std::vector<channel_message> responses;
     if (message.payload_type != channel_payload_type::string_payload) {
         return responses;
@@ -461,7 +491,8 @@ std::vector<channel_message> handle_channel_message(const channel_message& messa
         responses.push_back(make_string_message(
             message.source_id, namespace_receiver,
             receiver_status_payload(device_name, extract_json_int(message.payload_utf8,
-                                                                  "requestId"))));
+                                                                  "requestId"),
+                                    state)));
         return responses;
     }
 
@@ -475,25 +506,48 @@ std::vector<channel_message> handle_channel_message(const channel_message& messa
     }
 
     if (message.namespace_ == namespace_receiver && *type == "LAUNCH") {
+        auto app_id = extract_json_string(message.payload_utf8, "appId").value_or("");
+        if (is_default_media_app(app_id)) {
+            state.default_media_running = true;
+            responses.push_back(make_string_message(
+                message.source_id, namespace_receiver,
+                receiver_status_payload(device_name,
+                                        extract_json_int(message.payload_utf8, "requestId"),
+                                        state)));
+            return responses;
+        }
         responses.push_back(make_string_message(
             message.source_id, namespace_receiver,
-            launch_error_payload(extract_json_int(message.payload_utf8, "requestId"))));
+            launch_error_payload(extract_json_int(message.payload_utf8, "requestId"),
+                                 "NOT_SUPPORTED")));
         return responses;
     }
 
-    if (message.namespace_ == namespace_receiver &&
-        (*type == "STOP" || *type == "SET_VOLUME")) {
+    if (message.namespace_ == namespace_receiver && *type == "STOP") {
+        state.default_media_running = false;
         responses.push_back(make_string_message(
             message.source_id, namespace_receiver,
             receiver_status_payload(device_name, extract_json_int(message.payload_utf8,
-                                                                  "requestId"))));
+                                                                  "requestId"),
+                                    state)));
+        return responses;
+    }
+
+    if (message.namespace_ == namespace_receiver && *type == "SET_VOLUME") {
+        responses.push_back(make_string_message(
+            message.source_id, namespace_receiver,
+            receiver_status_payload(device_name, extract_json_int(message.payload_utf8,
+                                                                  "requestId"),
+                                    state)));
         return responses;
     }
 
     if (message.namespace_ == namespace_media && *type == "LOAD") {
+        const auto reason = state.default_media_running ? "MEDIA_NOT_SUPPORTED"
+                                                       : "RECEIVER_APP_NOT_RUNNING";
         responses.push_back(make_string_message(
             message.source_id, namespace_media,
-            load_failed_payload(extract_json_int(message.payload_utf8, "requestId"))));
+            load_failed_payload(extract_json_int(message.payload_utf8, "requestId"), reason)));
         return responses;
     }
 

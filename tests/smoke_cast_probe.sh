@@ -132,7 +132,7 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     length = struct.unpack(">I", recv_exact(sock, 4))[0]
     response = recv_exact(sock, length)
     assert b"GET_APP_AVAILABILITY" in response
-    assert b'"CC1AD845":"APP_NOT_AVAILABLE"' in response
+    assert b'"CC1AD845":"APP_AVAILABLE"' in response
     assert b'"requestId":2' in response
 
     sock.sendall(
@@ -143,8 +143,9 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     )
     length = struct.unpack(">I", recv_exact(sock, 4))[0]
     response = recv_exact(sock, length)
-    assert b"LAUNCH_ERROR" in response
-    assert b'"reason":"NOT_SUPPORTED"' in response
+    assert b"RECEIVER_STATUS" in response
+    assert b'"appId":"CC1AD845"' in response
+    assert b'"transportId":"web-1"' in response
     assert b'"requestId":3' in response
 
     sock.sendall(
@@ -168,7 +169,7 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     length = struct.unpack(">I", recv_exact(sock, 4))[0]
     response = recv_exact(sock, length)
     assert b"LOAD_FAILED" in response
-    assert b'"reason":"RECEIVER_APP_NOT_RUNNING"' in response
+    assert b'"reason":"MEDIA_NOT_SUPPORTED"' in response
     assert b'"requestId":7' in response
 
     sock.sendall(
@@ -182,6 +183,18 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     assert b"INVALID_REQUEST" in response
     assert b'"reason":"INVALID_MEDIA_SESSION_ID"' in response
     assert b'"requestId":8' in response
+
+    sock.sendall(
+        cast_message(
+            "urn:x-cast:com.google.cast.receiver",
+            '{"type":"STOP","requestId":10,"sessionId":"default-media-session"}',
+        )
+    )
+    length = struct.unpack(">I", recv_exact(sock, 4))[0]
+    response = recv_exact(sock, length)
+    assert b"RECEIVER_STATUS" in response
+    assert b'"applications":[]' in response
+    assert b'"requestId":10' in response
 
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 context.check_hostname = False
@@ -209,8 +222,9 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as raw
         )
         length = struct.unpack(">I", recv_exact(sock, 4))[0]
         response = recv_exact(sock, length)
-        assert b"LAUNCH_ERROR" in response
-        assert b'"reason":"NOT_SUPPORTED"' in response
+        assert b"RECEIVER_STATUS" in response
+        assert b'"appId":"CC1AD845"' in response
+        assert b'"transportId":"web-1"' in response
         assert b'"requestId":5' in response
 
         sock.sendall(
