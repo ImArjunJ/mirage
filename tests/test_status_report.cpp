@@ -1,4 +1,5 @@
 #include <array>
+#include <chrono>
 #include <iostream>
 #include <span>
 #include <string>
@@ -187,6 +188,50 @@ int main() {
     ok &= expect(contains(json, "\"reason\":\"decode_failures\""), "video reason missing");
     ok &= expect(contains(json, "\"frames\":90"), "video frame count missing");
     ok &= expect(contains(json, "\"decode_failures\":1"), "video failure count missing");
+
+    const auto summary = mirage::parse_status_summary(json);
+    ok &= expect(summary.name == "Living \"Room\"\n", "summary name unescape mismatch");
+    ok &= expect(summary.ip == "192.0.2.10", "summary ip mismatch");
+    ok &= expect(summary.interface_name == "wlan0", "summary interface mismatch");
+    ok &= expect(summary.protocols.size() == 3, "summary protocol count mismatch");
+    ok &= expect(summary.clients.size() == 1, "summary client count mismatch");
+    if (!summary.clients.empty()) {
+        ok &= expect(summary.clients[0].media.title == "song \"one\"",
+                     "summary media title mismatch");
+        ok &= expect(summary.clients[0].streams.size() == 2,
+                     "summary stream count mismatch");
+    }
+
+    const auto brief_text = mirage::render_status_summary_text(
+        summary, 42, false, std::chrono::system_clock::from_time_t(123456 + 3661));
+    ok &= expect(contains(brief_text, "mirage is running (pid 42)\n"),
+                 "brief status header mismatch");
+    ok &= expect(contains(brief_text, "  clients: 1\n"), "brief client count missing");
+
+    const auto verbose_text = mirage::render_status_summary_text(
+        summary, 42, true, std::chrono::system_clock::from_time_t(123456 + 3661));
+    ok &= expect(contains(verbose_text, "  name: Living \"Room\"\n"),
+                 "verbose status name missing");
+    ok &= expect(contains(verbose_text,
+                          "    airplay: listening, port 7000, transport rtsp/raop, "
+                          "audio/video/media/remote/metadata, advertised\n"),
+                 "verbose airplay line mismatch");
+    ok &= expect(contains(verbose_text,
+                          "    cast: error, port 8009, transport cast-v2, "
+                          "apps/remote, bind \"failed\"\n"),
+                 "verbose cast line mismatch");
+    ok &= expect(contains(verbose_text,
+                          "      media: song \"one\" - artist, album album, "
+                          "0:42/3:00, artwork image/jpeg 321 bytes\n"),
+                 "verbose media line mismatch");
+    ok &= expect(contains(verbose_text, "      audio: clean, decoded 118, received 120\n"),
+                 "verbose audio stream line mismatch");
+    ok &= expect(contains(verbose_text,
+                          "      video: attention, frames 90, keyframes 1, "
+                          "reason decode_failures\n"),
+                 "verbose video stream line mismatch");
+    ok &= expect(contains(verbose_text, "  uptime: 1h 1m 1s\n"),
+                 "verbose uptime mismatch");
 
     return ok ? 0 : 1;
 }
