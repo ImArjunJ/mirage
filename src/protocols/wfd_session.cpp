@@ -104,7 +104,19 @@ io::task<void> handle_wfd_connection(io::tcp_stream socket, receiver_session_obs
             }
             auto wire = wfd::serialize_control_response(*response, parsed->cseq);
             co_await socket.async_write(byte_view(wire));
-            if (response->event == wfd::control_event::media_trigger_requested) {
+            if (response->event == wfd::control_event::client_rtp_ports_configured) {
+                if (observer != nullptr && client_status_id != 0) {
+                    observer->client_stream_updated(
+                        client_status_id,
+                        control_stream_status(std::format(
+                            "rtp_ports_configured:{}",
+                            response->event_detail.empty() ? "unknown"
+                                                           : response->event_detail)));
+                }
+                mirage::log::diagnostic(
+                    "Miracast control: client_rtp_port={}",
+                    response->event_detail.empty() ? "unknown" : response->event_detail);
+            } else if (response->event == wfd::control_event::media_trigger_requested) {
                 if (observer != nullptr && client_status_id != 0) {
                     observer->client_stream_updated(client_status_id,
                                                     control_stream_status("trigger_accepted"));

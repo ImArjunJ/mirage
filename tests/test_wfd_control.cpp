@@ -67,10 +67,27 @@ int main() {
 
     auto accepted_set = mirage::protocols::wfd::analyze_set_parameters(
         "wfd_video_formats: 00 00 02 10 0001FFFF 1FFFFFFF 00000FFF 00 0000 0000 00 none "
-        "none\r\n"
-        "wfd_client_rtp_ports: RTP/AVP/UDP;unicast 19000 0 mode=play\r\n");
+        "none\r\n");
     ok &= expect(accepted_set.result == mirage::protocols::wfd::set_parameter_result::accepted,
                  "accepted SET_PARAMETER analysis mismatch");
+
+    auto rtp_ports_set = mirage::protocols::wfd::analyze_set_parameters(
+        "wfd_client_rtp_ports: RTP/AVP/UDP;unicast 19000 0 mode=play\r\n");
+    ok &= expect(rtp_ports_set.result ==
+                     mirage::protocols::wfd::set_parameter_result::client_rtp_ports,
+                 "rtp ports SET_PARAMETER analysis mismatch");
+    ok &= expect(rtp_ports_set.rtp_ports.has_value(), "rtp ports analysis missing parsed ports");
+    if (rtp_ports_set.rtp_ports) {
+        ok &= expect(rtp_ports_set.rtp_ports->profile == "RTP/AVP/UDP",
+                     "rtp ports profile mismatch");
+        ok &= expect(rtp_ports_set.rtp_ports->delivery == "unicast",
+                     "rtp ports delivery mismatch");
+        ok &= expect(rtp_ports_set.rtp_ports->primary_port == 19000,
+                     "rtp primary port mismatch");
+        ok &= expect(rtp_ports_set.rtp_ports->secondary_port == 0,
+                     "rtp secondary port mismatch");
+        ok &= expect(rtp_ports_set.rtp_ports->mode == "play", "rtp ports mode mismatch");
+    }
 
     auto trigger_set = mirage::protocols::wfd::analyze_set_parameters(
         "wfd_trigger_method: SETUP\r\n");
@@ -85,13 +102,30 @@ int main() {
                      mirage::protocols::wfd::set_parameter_result::unsupported_parameter,
                  "malformed SET_PARAMETER analysis mismatch");
 
+    auto malformed_ports = mirage::protocols::wfd::analyze_set_parameters(
+        "wfd_client_rtp_ports: RTP/AVP/UDP;unicast nope 0 mode=play\r\n");
+    ok &= expect(malformed_ports.result ==
+                     mirage::protocols::wfd::set_parameter_result::unsupported_parameter,
+                 "malformed rtp ports analysis mismatch");
+
     mirage::protocols::wfd::control_session_state state;
 
     auto set = mirage::protocols::wfd::handle_control_request(
-        request("SET_PARAMETER"), "wfd_client_rtp_ports: RTP/AVP/UDP;unicast 19000 0 mode=play\r\n");
+        request("SET_PARAMETER"), "wfd_client_rtp_ports: RTP/AVP/UDP;unicast 19000 0 mode=play\r\n",
+        state);
     ok &= expect(set.has_value(), "SET_PARAMETER response missing");
     if (set) {
         ok &= expect(set->status_code == 200, "SET_PARAMETER status mismatch");
+        ok &= expect(set->event ==
+                         mirage::protocols::wfd::control_event::client_rtp_ports_configured,
+                     "SET_PARAMETER rtp ports event mismatch");
+        ok &= expect(set->event_detail == "19000", "SET_PARAMETER rtp port detail mismatch");
+        ok &= expect(state.client_ports.has_value(), "SET_PARAMETER did not store client ports");
+        ok &= expect(state.client_rtp_port_updates == 1, "rtp port update count mismatch");
+        if (state.client_ports) {
+            ok &= expect(state.client_ports->primary_port == 19000,
+                         "stored rtp primary port mismatch");
+        }
     }
 
     auto trigger = mirage::protocols::wfd::handle_control_request(

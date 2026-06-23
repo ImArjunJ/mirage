@@ -146,6 +146,12 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     )
     response = recv_response(sock)
     assert "RTSP/1.0 200 OK" in response, response
+    wait_status_contains(
+        '"protocol":"miracast"',
+        '"kind":"control"',
+        '"health":"clean"',
+        '"reason":"rtp_ports_configured:19000"',
+    )
 
     body = b"wfd_trigger_method: SETUP\r\n"
     sock.sendall(
@@ -178,5 +184,6 @@ wait "${pid}"
 pid=
 
 grep -q "Miracast stream setup: mode=capability_listener" "${tmpdir}/err"
+grep -q "Miracast control: client_rtp_port=19000" "${tmpdir}/err"
 grep -q "Miracast control: trigger=SETUP accepted, media=unsupported" "${tmpdir}/err"
 grep -q "Miracast stream summary: health=attention, reason=media_not_implemented, method=SETUP" "${tmpdir}/err"

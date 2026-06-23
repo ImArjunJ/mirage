@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <charconv>
+#include <limits>
+#include <optional>
 #include <span>
 #include <sstream>
 #include <utility>
@@ -118,6 +121,55 @@ bool media_trigger_value(std::string_view value) {
            equals_ascii_case(value, "PAUSE") || equals_ascii_case(value, "RECORD");
 }
 
+std::optional<uint16_t> parse_u16(std::string_view value) {
+    uint32_t parsed = 0;
+    const auto* first = value.data();
+    const auto* last = value.data() + value.size();
+    const auto [ptr, ec] = std::from_chars(first, last, parsed);
+    if (ec != std::errc{} || ptr != last ||
+        parsed > std::numeric_limits<uint16_t>::max()) {
+        return std::nullopt;
+    }
+    return static_cast<uint16_t>(parsed);
+}
+
+std::optional<client_rtp_ports> parse_client_rtp_ports(std::string_view value) {
+    std::istringstream in{std::string(value)};
+    std::string transport_token;
+    std::string primary_token;
+    std::string secondary_token;
+    if (!(in >> transport_token >> primary_token >> secondary_token)) {
+        return std::nullopt;
+    }
+
+    auto primary = parse_u16(primary_token);
+    auto secondary = parse_u16(secondary_token);
+    if (!primary || !secondary) {
+        return std::nullopt;
+    }
+
+    client_rtp_ports ports;
+    const auto separator = transport_token.find(';');
+    ports.profile = separator == std::string::npos
+                        ? transport_token
+                        : transport_token.substr(0, separator);
+    ports.delivery = separator == std::string::npos
+                         ? std::string{}
+                         : transport_token.substr(separator + 1);
+    ports.primary_port = *primary;
+    ports.secondary_port = *secondary;
+
+    std::string token;
+    while (in >> token) {
+        constexpr std::string_view mode_prefix = "mode=";
+        if (token.starts_with(mode_prefix)) {
+            ports.mode = token.substr(mode_prefix.size());
+        }
+    }
+
+    return ports;
+}
+
 control_response make_simple_response(int code, std::string text) {
     control_response response;
     response.status_code = code;
@@ -185,6 +237,25 @@ set_parameter_analysis analyze_set_parameters(std::string_view body) {
                 .result = set_parameter_result::unsupported_parameter,
                 .parameter = std::string(parameter.name),
                 .value = std::string(parameter.value),
+                .rtp_ports = std::nullopt,
+            };
+        }
+
+        if (parameter.name == "wfd_client_rtp_ports") {
+            auto ports = parse_client_rtp_ports(parameter.value);
+            if (!ports) {
+                return {
+                    .result = set_parameter_result::unsupported_parameter,
+                    .parameter = std::string(parameter.name),
+                    .value = std::string(parameter.value),
+                    .rtp_ports = std::nullopt,
+                };
+            }
+            return {
+                .result = set_parameter_result::client_rtp_ports,
+                .parameter = std::string(parameter.name),
+                .value = std::string(parameter.value),
+                .rtp_ports = std::move(ports),
             };
         }
 
@@ -194,6 +265,7 @@ set_parameter_analysis analyze_set_parameters(std::string_view body) {
                 .result = set_parameter_result::media_trigger,
                 .parameter = std::string(parameter.name),
                 .value = std::string(parameter.value),
+                .rtp_ports = std::nullopt,
             };
         }
     }
@@ -236,6 +308,18 @@ result<control_response> handle_control_request(const rtsp_request_head& request
             response.headers.emplace_back("Supported", "org.wfa.wfd1.0");
             response.event = control_event::media_trigger_requested;
             response.event_detail = analysis.value;
+            return response;
+        }
+        if (analysis.result == set_parameter_result::client_rtp_ports) {
+            ++state.accepted_parameter_sets;
+            ++state.client_rtp_port_updates;
+            state.client_ports = analysis.rtp_ports;
+            auto response = make_simple_response(200, "OK");
+            response.headers.emplace_back("Supported", "org.wfa.wfd1.0");
+            response.event = control_event::client_rtp_ports_configured;
+            if (state.client_ports) {
+                response.event_detail = std::to_string(state.client_ports->primary_port);
+            }
             return response;
         }
         if (analysis.result == set_parameter_result::unsupported_parameter) {

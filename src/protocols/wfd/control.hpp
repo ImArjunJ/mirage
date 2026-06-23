@@ -17,19 +17,30 @@ inline constexpr std::string_view public_methods =
 
 enum class set_parameter_result : uint8_t {
     accepted,
+    client_rtp_ports,
     media_trigger,
     unsupported_parameter,
+};
+
+struct client_rtp_ports {
+    std::string profile;
+    std::string delivery;
+    uint16_t primary_port = 0;
+    uint16_t secondary_port = 0;
+    std::string mode;
 };
 
 struct set_parameter_analysis {
     set_parameter_result result = set_parameter_result::accepted;
     std::string parameter;
     std::string value;
+    std::optional<client_rtp_ports> rtp_ports;
 };
 
 enum class control_event : uint8_t {
     none,
     parameters_accepted,
+    client_rtp_ports_configured,
     media_trigger_requested,
     media_method_requested,
     unsupported_parameter,
@@ -38,7 +49,9 @@ enum class control_event : uint8_t {
 
 struct control_session_state {
     std::optional<std::string> pending_trigger;
+    std::optional<client_rtp_ports> client_ports;
     uint64_t accepted_parameter_sets = 0;
+    uint64_t client_rtp_port_updates = 0;
     uint64_t media_triggers = 0;
     uint64_t media_methods = 0;
     uint64_t unsupported_parameters = 0;
