@@ -7,7 +7,17 @@ if [[ $# -lt 1 ]]; then
 fi
 
 mirage_bin=$1
-port=${MIRAGE_SMOKE_PORT:-17333}
+port=${MIRAGE_SMOKE_PORT:-}
+if [[ -z "${port}" ]]; then
+    port=$(python3 - <<'PY'
+import socket
+
+with socket.socket() as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PY
+)
+fi
 iterations=${MIRAGE_SMOKE_ITERATIONS:-1}
 tmpdir=$(mktemp -d)
 pid=
@@ -23,7 +33,19 @@ trap cleanup EXIT
 
 XDG_CONFIG_HOME="${tmpdir}/config" XDG_STATE_HOME="${tmpdir}/state" "${mirage_bin}" --no-mdns --diagnostics --port "${port}" >"${tmpdir}/out" 2>"${tmpdir}/err" &
 pid=$!
-sleep 1
+
+status_json="${tmpdir}/state/mirage/status.json"
+for _ in {1..30}; do
+    if [[ -s "${status_json}" ]]; then
+        break
+    fi
+    sleep 0.1
+done
+test -s "${status_json}"
+grep -q '"id":"airplay"' "${status_json}"
+grep -q '"state":"listening"' "${status_json}"
+grep -q '"transport":"rtsp/raop"' "${status_json}"
+grep -q '"advertised":false' "${status_json}"
 
 for ((i = 1; i <= iterations; ++i)); do
     exec 3<>"/dev/tcp/127.0.0.1/${port}"

@@ -11,6 +11,7 @@
 #include <span>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "core/core.hpp"
@@ -1594,20 +1595,21 @@ io::task<void> rtsp_session::run_mirror_receiver() {
             mirage::log::info("Mirror connection accepted from {}:{}",
                               mirror_socket.remote_endpoint().addr.to_string(),
                               mirror_socket.remote_endpoint().port);
-            auto video_setup = airplay_media_.start_video({
-                .sink_config =
-                    {
-                        .codec = video_codec::h264,
-                        .width = 1280,
-                        .height = 720,
-                        .prefer_hardware = true,
-                        .title = "Mirage - AirPlay",
-                    },
-                .stream_connection_id = stream_connection_id_,
-                .keymsg = fp_keymsg_,
-                .ekey = fp_ekey_,
-                .shared_secret = pairing_.transient_shared_secret(),
-            });
+            media::video_stream_config sink_config;
+            sink_config.codec = video_codec::h264;
+            sink_config.width = 1280;
+            sink_config.height = 720;
+            sink_config.prefer_hardware = true;
+            sink_config.title = "Mirage - AirPlay";
+
+            airplay::video_source_config source_config;
+            source_config.sink_config = std::move(sink_config);
+            source_config.stream_connection_id = stream_connection_id_;
+            source_config.keymsg = fp_keymsg_;
+            source_config.ekey = fp_ekey_;
+            source_config.shared_secret = pairing_.transient_shared_secret();
+
+            auto video_setup = airplay_media_.start_video(source_config);
             if (!video_setup) {
                 mirage::log::warn("Video setup failed: {}", video_setup.error().message);
             }
