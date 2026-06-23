@@ -30,6 +30,7 @@
 #include "core/log.hpp"
 #include "core/receiver_adapter.hpp"
 #include "core/receiver_session.hpp"
+#include "core/runtime_paths.hpp"
 #include "core/status_report.hpp"
 #include "crypto/crypto.hpp"
 #include "discovery/discovery.hpp"
@@ -97,66 +98,24 @@ void drain_shutdown_work(mirage::io::io_context& ctx) {
 }
 
 std::filesystem::path state_dir() {
-#ifdef _WIN32
-    const char* appdata = std::getenv("LOCALAPPDATA");
-    if (appdata && appdata[0] != '\0') {
-        return std::filesystem::path(appdata) / "mirage";
-    }
-    const char* userprofile = std::getenv("USERPROFILE");
-    if (userprofile) {
-        return std::filesystem::path(userprofile) / ".mirage";
-    }
-    return std::filesystem::path("C:\\ProgramData") / "mirage";
-#else
-    const char* xdg = std::getenv("XDG_STATE_HOME");
-    if (xdg && xdg[0] != '\0') {
-        return std::filesystem::path(xdg) / "mirage";
-    }
-    const char* home = std::getenv("HOME");
-    if (!home) {
-        home = "/tmp";
-    }
-    return std::filesystem::path(home) / ".local" / "state" / "mirage";
-#endif
-}
-
-std::filesystem::path config_dir() {
-#ifdef _WIN32
-    const char* appdata = std::getenv("APPDATA");
-    if (appdata && appdata[0] != '\0') {
-        return std::filesystem::path(appdata) / "mirage";
-    }
-    return state_dir();
-#else
-    const char* xdg = std::getenv("XDG_CONFIG_HOME");
-    if (xdg && xdg[0] != '\0') {
-        return std::filesystem::path(xdg) / "mirage";
-    }
-    const char* home = std::getenv("HOME");
-    if (!home) {
-        home = "/tmp";
-    }
-    return std::filesystem::path(home) / ".config" / "mirage";
-#endif
+    return mirage::runtime_state_dir(mirage::current_runtime_path_environment());
 }
 
 std::filesystem::path default_config_file_path() {
-    return config_dir() / "config.conf";
+    return mirage::runtime_default_config_file_path(
+        mirage::current_runtime_path_environment());
 }
 
 std::filesystem::path pid_file_path() {
-    return state_dir() / "mirage.pid";
+    return mirage::runtime_pid_file_path(mirage::current_runtime_path_environment());
 }
 
 std::filesystem::path status_file_path() {
-    return state_dir() / "status.json";
+    return mirage::runtime_status_file_path(mirage::current_runtime_path_environment());
 }
 
 std::filesystem::path identity_key_path(const mirage::config& cfg) {
-    if (!cfg.identity_key_path.empty()) {
-        return std::filesystem::path(cfg.identity_key_path);
-    }
-    return state_dir() / "identity.key";
+    return mirage::runtime_identity_key_path(cfg, mirage::current_runtime_path_environment());
 }
 
 std::string inspect_port_command(uint16_t port) {
