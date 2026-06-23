@@ -125,6 +125,7 @@ add_executable(mirage
     src/protocols/cast/framing.cpp
     src/protocols/cast/message.cpp
     src/protocols/cast/probe.cpp
+    src/protocols/cast/tls.cpp
     src/protocols/wfd/control.cpp
     src/protocols/wfd_session.cpp
     src/protocols/receiver_sources.cpp

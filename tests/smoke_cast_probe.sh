@@ -62,6 +62,7 @@ printf "%s" "${response}" | grep -q '"status":"control_ready"'
 
 python3 - "${port}" <<'PY'
 import socket
+import ssl
 import struct
 import sys
 
@@ -145,12 +146,42 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     assert b"LAUNCH_ERROR" in response
     assert b'"reason":"NOT_SUPPORTED"' in response
     assert b'"requestId":3' in response
+
+context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+context.check_hostname = False
+context.verify_mode = ssl.CERT_NONE
+
+with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as raw:
+    with context.wrap_socket(raw, server_hostname="Mirage") as sock:
+        sock.sendall(
+            cast_message(
+                "urn:x-cast:com.google.cast.receiver",
+                '{"type":"GET_STATUS","requestId":4}',
+            )
+        )
+        length = struct.unpack(">I", recv_exact(sock, 4))[0]
+        response = recv_exact(sock, length)
+        assert b"RECEIVER_STATUS" in response
+        assert b'"requestId":4' in response
+        assert b'"friendlyName":"Mirage"' in response
+
+        sock.sendall(
+            cast_message(
+                "urn:x-cast:com.google.cast.receiver",
+                '{"type":"LAUNCH","requestId":5,"appId":"CC1AD845"}',
+            )
+        )
+        length = struct.unpack(">I", recv_exact(sock, 4))[0]
+        response = recv_exact(sock, length)
+        assert b"LAUNCH_ERROR" in response
+        assert b'"reason":"NOT_SUPPORTED"' in response
+        assert b'"requestId":5' in response
 PY
 
 kill -INT "${pid}"
 wait "${pid}"
 pid=
 
-grep -q "Cast stream setup: mode=control_status" "${tmpdir}/err"
+grep -q "Cast stream setup: mode=tls_control_status" "${tmpdir}/err"
 test -s "${tmpdir}/state/mirage/identity.key"
 grep -Eq '^[A-Za-z0-9+/]{43}=$' "${tmpdir}/state/mirage/identity.key"

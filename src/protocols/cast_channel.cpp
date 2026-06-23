@@ -14,6 +14,7 @@
 #include "protocols/cast/framing.hpp"
 #include "protocols/cast/message.hpp"
 #include "protocols/cast/probe.hpp"
+#include "protocols/cast/tls.hpp"
 #include "protocols/protocols.hpp"
 namespace mirage::protocols {
 struct cast_receiver::impl {
@@ -45,7 +46,23 @@ std::span<const std::byte> byte_view(std::string_view data) {
     return std::as_bytes(std::span<const char>(data.data(), data.size()));
 }
 
-io::task<void> handle_ready_frames(io::tcp_stream& socket, cast::channel_frame_parser& parser,
+io::task<bool> write_cast_frame(io::tcp_stream& socket, std::span<const std::byte> frame) {
+    co_await socket.async_write(frame);
+    co_return true;
+}
+
+io::task<bool> write_cast_frame(cast::tls_channel& socket, std::span<const std::byte> frame) {
+    auto written = co_await socket.async_write(frame);
+    if (!written) {
+        mirage::log::debug("cast tls channel: failed to write response: {}",
+                           written.error().message);
+        co_return false;
+    }
+    co_return true;
+}
+
+template <typename Stream>
+io::task<void> handle_ready_frames(Stream& socket, cast::channel_frame_parser& parser,
                                    std::string_view device_name) {
     while (auto frame = parser.next_frame()) {
         auto message = cast::parse_channel_message(*frame);
@@ -71,8 +88,11 @@ io::task<void> handle_ready_frames(io::tcp_stream& socket, cast::channel_frame_p
                                    framed.error().message);
                 continue;
             }
-            co_await socket.async_write(std::span<const std::byte>(framed->data(),
-                                                                    framed->size()));
+            auto written = co_await write_cast_frame(
+                socket, std::span<const std::byte>(framed->data(), framed->size()));
+            if (!written) {
+                co_return;
+            }
         }
     }
 }
@@ -102,6 +122,37 @@ io::task<void> handle_cast_channel(io::tcp_stream& socket, std::string_view firs
     }
 }
 
+io::task<void> handle_cast_tls_channel(io::tcp_stream socket, std::string_view first_packet,
+                                       std::string device_name) {
+    auto accepted = co_await cast::tls_channel::accept(std::move(socket), byte_view(first_packet));
+    if (!accepted) {
+        mirage::log::debug("cast tls channel: handshake failed: {}", accepted.error().message);
+        co_return;
+    }
+
+    auto tls = std::move(*accepted);
+    mirage::log::debug("cast tls channel: control/status enabled");
+
+    cast::channel_frame_parser parser;
+    std::array<std::byte, 2048> buffer{};
+    while (tls.is_open()) {
+        auto n = co_await tls.async_read(buffer);
+        if (!n) {
+            mirage::log::debug("cast tls channel: read failed: {}", n.error().message);
+            co_return;
+        }
+        if (*n == 0) {
+            co_return;
+        }
+        auto appended = parser.append(std::span<const std::byte>(buffer.data(), *n));
+        if (!appended) {
+            mirage::log::debug("cast tls channel: rejected frame: {}", appended.error().message);
+            co_return;
+        }
+        co_await handle_ready_frames(tls, parser, device_name);
+    }
+}
+
 io::task<void> handle_cast_connection(io::tcp_stream socket, std::string device_name) {
     std::array<std::byte, 2048> buffer{};
     try {
@@ -116,8 +167,9 @@ io::task<void> handle_cast_connection(io::tcp_stream socket, std::string device_
                 break;
             case cast::probe_kind::tls_client_hello:
                 mirage::log::debug(
-                    "cast probe: cast v2 TLS client connected, media channel is not implemented");
-                break;
+                    "cast tls channel: client connected, media channel is not implemented");
+                co_await handle_cast_tls_channel(std::move(socket), data, device_name);
+                co_return;
             case cast::probe_kind::channel_frame:
                 mirage::log::debug(
                     "cast channel: plaintext frame stream connected, control/status enabled");
