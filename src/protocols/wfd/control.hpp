@@ -13,7 +13,7 @@
 namespace mirage::protocols::wfd {
 
 inline constexpr std::string_view public_methods =
-    "org.wfa.wfd1.0, GET_PARAMETER, SET_PARAMETER, OPTIONS, TEARDOWN";
+    "org.wfa.wfd1.0, GET_PARAMETER, SET_PARAMETER, OPTIONS, SETUP, PLAY, PAUSE, TEARDOWN";
 
 enum class set_parameter_result : uint8_t {
     accepted,
@@ -42,7 +42,9 @@ enum class control_event : uint8_t {
     parameters_accepted,
     client_rtp_ports_configured,
     media_trigger_requested,
-    media_method_requested,
+    media_setup_accepted,
+    media_play_requested,
+    media_pause_requested,
     unsupported_parameter,
     teardown_requested,
 };
@@ -53,9 +55,14 @@ struct control_session_state {
     uint64_t accepted_parameter_sets = 0;
     uint64_t client_rtp_port_updates = 0;
     uint64_t media_triggers = 0;
-    uint64_t media_methods = 0;
+    uint64_t media_setups = 0;
+    uint64_t media_plays = 0;
+    uint64_t media_pauses = 0;
+    bool media_setup = false;
+    bool playing = false;
     uint64_t unsupported_parameters = 0;
     bool teardown_requested = false;
+    std::string session_id = "mirage-wfd";
 };
 
 struct control_response {

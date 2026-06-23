@@ -922,7 +922,7 @@ int handle_status(bool verbose) {
     auto is_default_protocol_detail = [](std::string_view detail) {
         return detail == "disabled by config" || detail == "rtsp/raop receiver" ||
                detail == "cast v2 control/media status receiver" ||
-               detail == "wfd capability listener";
+               detail == "wfd control/media lifecycle receiver";
     };
 
     auto name = extract_string("name");

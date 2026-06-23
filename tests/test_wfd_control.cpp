@@ -110,6 +110,18 @@ int main() {
 
     mirage::protocols::wfd::control_session_state state;
 
+    mirage::protocols::wfd::control_session_state empty_state;
+    auto setup_without_ports = mirage::protocols::wfd::handle_control_request(
+        request("SETUP"), "", empty_state);
+    ok &= expect(setup_without_ports.has_value(), "SETUP without ports response missing");
+    if (setup_without_ports) {
+        ok &= expect(setup_without_ports->status_code == 455,
+                     "SETUP without ports status mismatch");
+        ok &= expect(contains(setup_without_ports->body, "missing-client-rtp-ports"),
+                     "SETUP without ports detail missing");
+        ok &= expect(!empty_state.media_setup, "SETUP without ports changed media state");
+    }
+
     auto set = mirage::protocols::wfd::handle_control_request(
         request("SET_PARAMETER"), "wfd_client_rtp_ports: RTP/AVP/UDP;unicast 19000 0 mode=play\r\n",
         state);
@@ -160,15 +172,48 @@ int main() {
     auto setup = mirage::protocols::wfd::handle_control_request(request("SETUP"), "", state);
     ok &= expect(setup.has_value(), "SETUP response missing");
     if (setup) {
-        ok &= expect(setup->status_code == 501, "SETUP should be explicit unsupported media");
-        ok &= expect(contains(setup->body, "media-not-implemented"),
-                     "SETUP unsupported detail missing");
-        ok &= expect(contains(setup->body, "method: SETUP"), "SETUP method detail missing");
-        ok &= expect(contains(setup->body, "trigger: SETUP"), "SETUP trigger detail missing");
+        ok &= expect(setup->status_code == 200, "SETUP status mismatch");
+        ok &= expect(contains(setup->body, "wfd_status: setup-accepted"),
+                     "SETUP accepted detail missing");
+        ok &= expect(contains(setup->body, "renderer: unavailable"),
+                     "SETUP renderer detail missing");
         ok &= expect(setup->event ==
-                         mirage::protocols::wfd::control_event::media_method_requested,
+                         mirage::protocols::wfd::control_event::media_setup_accepted,
                      "SETUP event mismatch");
-        ok &= expect(state.media_methods == 1, "media method count mismatch");
+        ok &= expect(contains(
+                         mirage::protocols::wfd::serialize_control_response(*setup, 5),
+                         "Session: mirage-wfd"),
+                     "SETUP session header missing");
+        ok &= expect(contains(
+                         mirage::protocols::wfd::serialize_control_response(*setup, 5),
+                         "Transport: RTP/AVP/UDP;unicast;client_port=19000"),
+                     "SETUP transport header missing");
+        ok &= expect(state.media_setup, "SETUP did not mark media setup");
+        ok &= expect(state.media_setups == 1, "media setup count mismatch");
+    }
+
+    auto play = mirage::protocols::wfd::handle_control_request(request("PLAY"), "", state);
+    ok &= expect(play.has_value(), "PLAY response missing");
+    if (play) {
+        ok &= expect(play->status_code == 200, "PLAY status mismatch");
+        ok &= expect(contains(play->body, "wfd_status: playing"), "PLAY body mismatch");
+        ok &= expect(play->event ==
+                         mirage::protocols::wfd::control_event::media_play_requested,
+                     "PLAY event mismatch");
+        ok &= expect(state.playing, "PLAY did not mark playing");
+        ok &= expect(state.media_plays == 1, "media play count mismatch");
+    }
+
+    auto pause = mirage::protocols::wfd::handle_control_request(request("PAUSE"), "", state);
+    ok &= expect(pause.has_value(), "PAUSE response missing");
+    if (pause) {
+        ok &= expect(pause->status_code == 200, "PAUSE status mismatch");
+        ok &= expect(contains(pause->body, "wfd_status: paused"), "PAUSE body mismatch");
+        ok &= expect(pause->event ==
+                         mirage::protocols::wfd::control_event::media_pause_requested,
+                     "PAUSE event mismatch");
+        ok &= expect(!state.playing, "PAUSE left playing set");
+        ok &= expect(state.media_pauses == 1, "media pause count mismatch");
     }
 
     auto teardown = mirage::protocols::wfd::handle_control_request(request("TEARDOWN"), "", state);
@@ -179,6 +224,7 @@ int main() {
                          mirage::protocols::wfd::control_event::teardown_requested,
                      "TEARDOWN event mismatch");
         ok &= expect(state.teardown_requested, "TEARDOWN state mismatch");
+        ok &= expect(!state.media_setup, "TEARDOWN left media setup set");
     }
 
     auto invalid_version = request("OPTIONS");

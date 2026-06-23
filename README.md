@@ -5,14 +5,14 @@ local-network receiver.
 one small receiver core, with adapters for airplay, cast, and miracast / wi-fi
 display.
 
-airplay is the useful path today. cast and miracast are present as early
-adapters, not full media receivers yet.
+airplay is the useful media path today. cast and miracast are growing out from
+discovery, control, and status before media rendering.
 
 ## status
 
 - airplay mirroring and audio work on the tested ios path
-- cast has discovery, probe, tls control, app state, and volume/status events
-- miracast / wfd has capability negotiation
+- cast has discovery, probe, tls control, app/media status, and volume events
+- miracast / wfd has capability negotiation and setup/play/pause control state
 - linux is the main runtime target
 - windows builds in ci; runtime support is early
 - macos, cast media streaming, and wfd media streaming are later

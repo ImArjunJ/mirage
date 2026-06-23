@@ -69,8 +69,14 @@ int main() {
             .port = 7236,
             .enabled = false,
             .experimental = true,
-            .detail = "wfd capability listener",
-            .capabilities = {.network_listener = true, .transport = "wfd"},
+            .detail = "wfd control/media lifecycle receiver",
+            .capabilities =
+                {
+                    .network_listener = true,
+                    .media_setup = true,
+                    .media_control = true,
+                    .transport = "wfd",
+                },
         },
     };
 

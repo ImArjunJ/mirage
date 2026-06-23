@@ -118,7 +118,7 @@ bool known_set_parameter(std::string_view name) {
 
 bool media_trigger_value(std::string_view value) {
     return equals_ascii_case(value, "SETUP") || equals_ascii_case(value, "PLAY") ||
-           equals_ascii_case(value, "PAUSE") || equals_ascii_case(value, "RECORD");
+           equals_ascii_case(value, "PAUSE");
 }
 
 std::optional<uint16_t> parse_u16(std::string_view value) {
@@ -178,22 +178,17 @@ control_response make_simple_response(int code, std::string text) {
     return response;
 }
 
-control_response media_not_implemented(std::string_view method,
-                                       const std::optional<std::string>& pending_trigger) {
-    auto response = make_simple_response(501, "Media Not Implemented");
-    response.body = "wfd_error: media-not-implemented\r\n";
-    if (!method.empty()) {
-        response.body += "method: ";
-        response.body += method;
-        response.body += "\r\n";
-    }
-    if (pending_trigger && !pending_trigger->empty()) {
-        response.body += "trigger: ";
-        response.body += *pending_trigger;
-        response.body += "\r\n";
-    }
+control_response method_not_valid(std::string_view method, std::string reason) {
+    auto response = make_simple_response(455, "Method Not Valid in This State");
+    response.body = "wfd_error: method-not-valid\r\n";
+    response.body += "method: ";
+    response.body += method;
+    response.body += "\r\n";
+    response.body += "reason: ";
+    response.body += reason;
+    response.body += "\r\n";
     response.headers.emplace_back("Content-Type", "text/parameters");
-    response.event = control_event::media_method_requested;
+    response.event = control_event::unsupported_parameter;
     response.event_detail = std::string(method);
     return response;
 }
@@ -209,6 +204,43 @@ control_response parameter_not_understood(const set_parameter_analysis& analysis
     response.headers.emplace_back("Content-Type", "text/parameters");
     response.event = control_event::unsupported_parameter;
     response.event_detail = analysis.parameter;
+    return response;
+}
+
+std::string setup_transport_header(const std::optional<client_rtp_ports>& ports) {
+    if (!ports) {
+        return "RTP/AVP/UDP;unicast;server_port=0-0";
+    }
+
+    std::string header = ports->profile.empty() ? "RTP/AVP/UDP" : ports->profile;
+    if (!ports->delivery.empty()) {
+        header += ";";
+        header += ports->delivery;
+    }
+    header += ";client_port=";
+    header += std::to_string(ports->primary_port);
+    if (ports->secondary_port != 0) {
+        header += "-";
+        header += std::to_string(ports->secondary_port);
+    }
+    header += ";server_port=0-0";
+    if (!ports->mode.empty()) {
+        header += ";mode=";
+        header += ports->mode;
+    }
+    return header;
+}
+
+control_response make_media_state_response(std::string_view status,
+                                           std::string_view renderer = "unavailable") {
+    auto response = make_simple_response(200, "OK");
+    response.headers.emplace_back("Supported", "org.wfa.wfd1.0");
+    response.headers.emplace_back("Content-Type", "text/parameters");
+    response.body = "wfd_status: ";
+    response.body += status;
+    response.body += "\r\nrenderer: ";
+    response.body += renderer;
+    response.body += "\r\n";
     return response;
 }
 
@@ -337,14 +369,52 @@ result<control_response> handle_control_request(const rtsp_request_head& request
         auto response = make_simple_response(200, "OK");
         response.close_after_send = true;
         response.event = control_event::teardown_requested;
+        response.event_detail = state.media_setup ? "session" : "control";
+        state.media_setup = false;
+        state.playing = false;
         state.teardown_requested = true;
         return response;
     }
 
-    if (request.method == "SETUP" || request.method == "PLAY" || request.method == "PAUSE" ||
-        request.method == "RECORD") {
-        ++state.media_methods;
-        return media_not_implemented(request.method, state.pending_trigger);
+    if (request.method == "SETUP") {
+        if (!state.client_ports) {
+            return method_not_valid(request.method, "missing-client-rtp-ports");
+        }
+        ++state.media_setups;
+        state.media_setup = true;
+        state.playing = false;
+        auto response = make_media_state_response("setup-accepted", "unavailable");
+        response.headers.emplace_back("Session", state.session_id);
+        response.headers.emplace_back("Transport", setup_transport_header(state.client_ports));
+        response.event = control_event::media_setup_accepted;
+        response.event_detail = std::to_string(state.client_ports->primary_port);
+        return response;
+    }
+
+    if (request.method == "PLAY") {
+        if (!state.media_setup) {
+            return method_not_valid(request.method, "missing-setup");
+        }
+        ++state.media_plays;
+        state.playing = true;
+        auto response = make_media_state_response("playing", "unavailable");
+        response.headers.emplace_back("Session", state.session_id);
+        response.event = control_event::media_play_requested;
+        response.event_detail = "PLAY";
+        return response;
+    }
+
+    if (request.method == "PAUSE") {
+        if (!state.media_setup) {
+            return method_not_valid(request.method, "missing-setup");
+        }
+        ++state.media_pauses;
+        state.playing = false;
+        auto response = make_media_state_response("paused", "unavailable");
+        response.headers.emplace_back("Session", state.session_id);
+        response.event = control_event::media_pause_requested;
+        response.event_detail = "PAUSE";
+        return response;
     }
 
     return make_simple_response(405, "Method Not Allowed");

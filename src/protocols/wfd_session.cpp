@@ -51,12 +51,27 @@ receiver_client_stream_status control_stream_status(std::string reason) {
     };
 }
 
-receiver_client_stream_status media_not_implemented_status(std::string_view method) {
+receiver_client_stream_status media_control_status(std::string reason,
+                                                   std::string health = "clean") {
     return {
         .kind = "media",
-        .health = "attention",
-        .reason = method.empty() ? "media_not_implemented" :
-                                   std::format("media_not_implemented:{}", method),
+        .health = std::move(health),
+        .reason = std::move(reason),
+    };
+}
+
+receiver_client_media_status wfd_media_status(bool active, std::string title) {
+    return {
+        .active = active,
+        .title = std::move(title),
+        .artist = "wfd",
+        .album = {},
+        .artwork_type = {},
+        .artwork_bytes = 0,
+        .position_ms = 0,
+        .duration_ms = 0,
+        .volume_db = 0.0F,
+        .volume_linear = 1.0F,
     };
 }
 
@@ -118,20 +133,57 @@ io::task<void> handle_wfd_connection(io::tcp_stream socket, receiver_session_obs
                     response->event_detail.empty() ? "unknown" : response->event_detail);
             } else if (response->event == wfd::control_event::media_trigger_requested) {
                 if (observer != nullptr && client_status_id != 0) {
-                    observer->client_stream_updated(client_status_id,
-                                                    control_stream_status("trigger_accepted"));
+                    observer->client_stream_updated(
+                        client_status_id,
+                        control_stream_status(std::format(
+                            "trigger_accepted:{}",
+                            response->event_detail.empty() ? "unknown"
+                                                           : response->event_detail)));
                 }
                 mirage::log::diagnostic(
-                    "Miracast control: trigger={} accepted, media=unsupported",
+                    "Miracast control: trigger={} accepted",
                     response->event_detail);
-            } else if (response->event == wfd::control_event::media_method_requested) {
+            } else if (response->event == wfd::control_event::media_setup_accepted) {
                 if (observer != nullptr && client_status_id != 0) {
                     observer->client_stream_updated(
-                        client_status_id, media_not_implemented_status(response->event_detail));
+                        client_status_id,
+                        media_control_status(std::format(
+                            "setup_accepted_no_renderer:{}",
+                            response->event_detail.empty() ? "unknown"
+                                                           : response->event_detail)));
+                    observer->client_media_updated(
+                        client_status_id, wfd_media_status(true, "miracast session"));
                 }
                 mirage::log::diagnostic(
-                    "Miracast stream summary: health=attention, "
-                    "reason=media_not_implemented, method={}",
+                    "Miracast control: media_setup accepted, client_rtp_port={}, "
+                    "renderer=unsupported",
+                    response->event_detail.empty() ? "unknown" : response->event_detail);
+            } else if (response->event == wfd::control_event::media_play_requested) {
+                if (observer != nullptr && client_status_id != 0) {
+                    observer->client_stream_updated(
+                        client_status_id, media_control_status("playing_no_renderer"));
+                    observer->client_media_updated(
+                        client_status_id, wfd_media_status(true, "miracast playing"));
+                }
+                mirage::log::diagnostic(
+                    "Miracast control: playback=play, renderer=unsupported");
+            } else if (response->event == wfd::control_event::media_pause_requested) {
+                if (observer != nullptr && client_status_id != 0) {
+                    observer->client_stream_updated(
+                        client_status_id, media_control_status("paused_no_renderer"));
+                    observer->client_media_updated(
+                        client_status_id, wfd_media_status(true, "miracast paused"));
+                }
+                mirage::log::diagnostic(
+                    "Miracast control: playback=pause, renderer=unsupported");
+            } else if (response->event == wfd::control_event::teardown_requested) {
+                if (observer != nullptr && client_status_id != 0) {
+                    observer->client_stream_updated(client_status_id,
+                                                    media_control_status("torn_down"));
+                    observer->client_media_updated(client_status_id, wfd_media_status(false, ""));
+                }
+                mirage::log::diagnostic(
+                    "Miracast control: teardown={}, session closed",
                     response->event_detail);
             } else if (response->event == wfd::control_event::unsupported_parameter) {
                 mirage::log::diagnostic(
