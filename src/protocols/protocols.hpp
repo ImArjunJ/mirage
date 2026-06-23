@@ -69,6 +69,7 @@ private:
     void close_audio_stream();
     void close_video_stream();
     void close_stream_sockets();
+    void publish_media_status();
     rtsp_session(io::tcp_stream socket, crypto::fairplay_pairing pairing,
                  receiver_source_descriptor source, receiver_session_observer* observer,
                  uint64_t client_status_id);
@@ -99,6 +100,7 @@ private:
     int audio_spf_ = 352;
     float audio_volume_db_ = 0.0F;
     float audio_linear_volume_ = 1.0F;
+    receiver_client_media_status media_status_;
     uint16_t audio_resend_control_seqnum_ = 0;
     io::endpoint audio_control_remote_;
 };

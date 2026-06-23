@@ -14,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #ifdef _WIN32
@@ -813,6 +814,43 @@ int handle_status(bool verbose) {
         return {};
     };
 
+    auto extract_object_from = [](std::string_view object,
+                                  const std::string& key) -> std::string_view {
+        auto needle = "\"" + key + "\":{";
+        auto pos = object.find(needle);
+        if (pos == std::string_view::npos) {
+            return {};
+        }
+        auto object_start = pos + needle.size() - 1;
+        size_t depth = 0;
+        bool in_string = false;
+        bool escaped = false;
+        for (size_t scan = object_start; scan < object.size(); ++scan) {
+            char c = object[scan];
+            if (in_string) {
+                if (escaped) {
+                    escaped = false;
+                } else if (c == '\\') {
+                    escaped = true;
+                } else if (c == '"') {
+                    in_string = false;
+                }
+                continue;
+            }
+            if (c == '"') {
+                in_string = true;
+            } else if (c == '{') {
+                ++depth;
+            } else if (c == '}') {
+                --depth;
+                if (depth == 0) {
+                    return object.substr(object_start, scan - object_start + 1);
+                }
+            }
+        }
+        return {};
+    };
+
     auto extract_objects = [](std::string_view array) -> std::vector<std::string_view> {
         std::vector<std::string_view> objects;
         size_t object_start = std::string_view::npos;
@@ -868,6 +906,17 @@ int handle_status(bool verbose) {
         append("remote_control", "remote");
         append("metadata", "metadata");
         return summary;
+    };
+
+    auto format_media_time = [](int64_t millis) {
+        auto total_seconds = millis <= 0 ? 0 : (millis + 500) / 1000;
+        auto hours = total_seconds / 3600;
+        auto minutes = (total_seconds % 3600) / 60;
+        auto seconds = total_seconds % 60;
+        if (hours > 0) {
+            return std::format("{}:{:02}:{:02}", hours, minutes, seconds);
+        }
+        return std::format("{}:{:02}", minutes, seconds);
     };
 
     auto is_default_protocol_detail = [](std::string_view detail) {
@@ -964,6 +1013,49 @@ int handle_status(bool verbose) {
                 line += std::format(", {}", client_name);
             }
             std::println(stderr, "{}", line);
+
+            auto media = extract_object_from(object, "media");
+            if (!media.empty()) {
+                auto active = extract_bool_from(media, "active").value_or(false);
+                auto title = extract_string_from(media, "title");
+                auto artist = extract_string_from(media, "artist");
+                auto album = extract_string_from(media, "album");
+                auto artwork_type = extract_string_from(media, "artwork_type");
+                auto artwork_bytes = extract_int_from(media, "artwork_bytes").value_or(0);
+                auto position_ms = extract_int_from(media, "position_ms").value_or(0);
+                auto duration_ms = extract_int_from(media, "duration_ms").value_or(0);
+                const bool has_media = active || !title.empty() || !artist.empty() ||
+                                       !album.empty() || artwork_bytes > 0 ||
+                                       position_ms > 0 || duration_ms > 0;
+                if (has_media) {
+                    std::string media_line = "      media:";
+                    if (!title.empty()) {
+                        media_line += std::format(" {}", title);
+                        if (!artist.empty()) {
+                            media_line += std::format(" - {}", artist);
+                        }
+                    } else if (!artist.empty()) {
+                        media_line += std::format(" {}", artist);
+                    } else {
+                        media_line += " active";
+                    }
+                    if (!album.empty()) {
+                        media_line += std::format(", album {}", album);
+                    }
+                    if (duration_ms > 0) {
+                        media_line += std::format(", {}/{}", format_media_time(position_ms),
+                                                  format_media_time(duration_ms));
+                    }
+                    if (artwork_bytes > 0) {
+                        media_line += ", artwork";
+                        if (!artwork_type.empty()) {
+                            media_line += std::format(" {}", artwork_type);
+                        }
+                        media_line += std::format(" {} bytes", artwork_bytes);
+                    }
+                    std::println(stderr, "{}", media_line);
+                }
+            }
 
             for (auto stream : extract_objects(extract_array_from(object, "streams"))) {
                 auto kind = extract_string_from(stream, "kind");
@@ -1165,6 +1257,17 @@ public:
         } else {
             *existing = std::move(stream);
         }
+        write();
+    }
+
+    void client_media_updated(uint64_t client_id,
+                              mirage::receiver_client_media_status media) override {
+        auto client = std::ranges::find(clients_, client_id, &mirage::receiver_client_status::id);
+        if (client == clients_.end()) {
+            return;
+        }
+
+        client->media = std::move(media);
         write();
     }
 

@@ -103,6 +103,18 @@ std::string render_status_json(const receiver_status_report& report) {
         out << ",\"address\":\"" << json_escape(client.address) << "\"";
         out << ",\"state\":\"" << json_escape(client.state) << "\"";
         out << ",\"connected_at\":" << client.connected_at;
+        out << ",\"media\":{";
+        out << "\"active\":" << json_bool(client.media.active);
+        out << ",\"title\":\"" << json_escape(client.media.title) << "\"";
+        out << ",\"artist\":\"" << json_escape(client.media.artist) << "\"";
+        out << ",\"album\":\"" << json_escape(client.media.album) << "\"";
+        out << ",\"artwork_type\":\"" << json_escape(client.media.artwork_type) << "\"";
+        out << ",\"artwork_bytes\":" << client.media.artwork_bytes;
+        out << ",\"position_ms\":" << client.media.position_ms;
+        out << ",\"duration_ms\":" << client.media.duration_ms;
+        out << ",\"volume_db\":" << client.media.volume_db;
+        out << ",\"volume_linear\":" << client.media.volume_linear;
+        out << "}";
         out << ",\"streams\":[";
         for (size_t stream_index = 0; stream_index < client.streams.size(); ++stream_index) {
             const auto& stream = client.streams[stream_index];

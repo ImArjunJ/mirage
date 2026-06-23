@@ -20,6 +20,7 @@
 #include "io/io.hpp"
 #include "media/media.hpp"
 #include "media/pipeline.hpp"
+#include "protocols/airplay/media_metadata.hpp"
 #include "protocols/airplay/media_source.hpp"
 #include "protocols/airplay_protocol.hpp"
 #include "protocols/protocols.hpp"
@@ -635,6 +636,11 @@ void rtsp_session::close_stream_sockets() {
     close_video_stream();
     close_audio_stream();
     base_receivers_started_ = false;
+}
+void rtsp_session::publish_media_status() {
+    if (observer_ != nullptr && client_status_id_ != 0) {
+        observer_->client_media_updated(client_status_id_, media_status_);
+    }
 }
 void rtsp_session::stop() {
     state_ = rtsp_session_state::teardown;
@@ -2187,7 +2193,13 @@ result<rtsp_response> rtsp_session::handle_set_parameter(const rtsp_request& req
                 try {
                     audio_volume_db_ = std::stof(body_str.substr(pos + 7));
                     audio_linear_volume_ = airplay::db_to_linear(audio_volume_db_);
-                    media_sink_->on_audio_volume(audio_volume_db_, audio_linear_volume_);
+                    if (media_sink_) {
+                        media_sink_->on_audio_volume(audio_volume_db_, audio_linear_volume_);
+                    }
+                    media_status_.active = true;
+                    media_status_.volume_db = audio_volume_db_;
+                    media_status_.volume_linear = audio_linear_volume_;
+                    publish_media_status();
                 } catch (const std::exception& e) {
                     mirage::log::warn("Invalid volume parameter: {}", e.what());
                 }
@@ -2195,11 +2207,38 @@ result<rtsp_response> rtsp_session::handle_set_parameter(const rtsp_request& req
         }
         if (body_str.find("progress:") != std::string::npos) {
             mirage::log::debug("SET_PARAMETER progress: {}", body_str);
+            if (auto progress =
+                    ::mirage::airplay::parse_airplay_progress(body_str, audio_sample_rate_)) {
+                media_status_.active = true;
+                media_status_.position_ms = progress->position_ms;
+                media_status_.duration_ms = progress->duration_ms;
+                publish_media_status();
+            }
         }
     } else if (content_type == "image/jpeg" || content_type == "image/png") {
         mirage::log::debug("SET_PARAMETER received artwork ({} bytes)", req.body.size());
+        media_status_.active = true;
+        media_status_.artwork_type = content_type;
+        media_status_.artwork_bytes = req.body.size();
+        publish_media_status();
     } else if (content_type == "application/x-dmap-tagged") {
         mirage::log::debug("SET_PARAMETER received DMAP metadata ({} bytes)", req.body.size());
+        auto metadata = ::mirage::airplay::parse_dmap_media_metadata(
+            std::span<const std::byte>(req.body.data(), req.body.size()));
+        if (!metadata.title.empty()) {
+            media_status_.title = std::move(metadata.title);
+        }
+        if (!metadata.artist.empty()) {
+            media_status_.artist = std::move(metadata.artist);
+        }
+        if (!metadata.album.empty()) {
+            media_status_.album = std::move(metadata.album);
+        }
+        if (!media_status_.title.empty() || !media_status_.artist.empty() ||
+            !media_status_.album.empty()) {
+            media_status_.active = true;
+            publish_media_status();
+        }
     } else {
         mirage::log::debug("SET_PARAMETER unknown content type: {}", content_type);
     }
@@ -2283,6 +2322,7 @@ io::task<void> rtsp_server::run() {
                     .address = socket.remote_endpoint().addr.to_string(),
                     .state = "connected",
                     .connected_at = 0,
+                    .media = {},
                     .streams = {},
                 });
             }

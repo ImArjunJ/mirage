@@ -80,34 +80,41 @@ int main() {
     adapters.mark_advertised(mirage::protocol::airplay);
     adapters.mark_error(mirage::protocol::cast, "bind \"failed\"");
 
-    std::array clients{
-        mirage::receiver_client_status{
-            .id = 7,
-            .protocol_id = mirage::protocol::airplay,
-            .name = "Junie",
-            .address = "192.0.2.20",
-            .state = "connected",
-            .connected_at = 123460,
-            .streams =
-                {
-                    mirage::receiver_client_stream_status{
-                        .kind = "audio",
-                        .health = "clean",
-                        .reason = "ok",
-                        .received_packets = 120,
-                        .decoded_packets = 118,
-                        .silent_or_marker = 2,
-                    },
-                    mirage::receiver_client_stream_status{
-                        .kind = "video",
-                        .health = "attention",
-                        .reason = "decode_failures",
-                        .frames = 90,
-                        .keyframes = 1,
-                        .decrypted_frames = 89,
-                        .decode_failures = 1,
-                    },
-                },
+    std::array<mirage::receiver_client_status, 1> clients{};
+    auto& client = clients[0];
+    client.id = 7;
+    client.protocol_id = mirage::protocol::airplay;
+    client.name = "Junie";
+    client.address = "192.0.2.20";
+    client.state = "connected";
+    client.connected_at = 123460;
+    client.media.active = true;
+    client.media.title = "song \"one\"";
+    client.media.artist = "artist";
+    client.media.album = "album";
+    client.media.artwork_type = "image/jpeg";
+    client.media.artwork_bytes = 321;
+    client.media.position_ms = 42000;
+    client.media.duration_ms = 180000;
+    client.media.volume_db = -12.5F;
+    client.media.volume_linear = 0.237F;
+    client.streams = {
+        mirage::receiver_client_stream_status{
+            .kind = "audio",
+            .health = "clean",
+            .reason = "ok",
+            .received_packets = 120,
+            .decoded_packets = 118,
+            .silent_or_marker = 2,
+        },
+        mirage::receiver_client_stream_status{
+            .kind = "video",
+            .health = "attention",
+            .reason = "decode_failures",
+            .frames = 90,
+            .keyframes = 1,
+            .decrypted_frames = 89,
+            .decode_failures = 1,
         },
     };
 
@@ -155,6 +162,16 @@ int main() {
     ok &= expect(contains(json, "\"name\":\"Junie\""), "client name missing");
     ok &= expect(contains(json, "\"address\":\"192.0.2.20\""), "client address missing");
     ok &= expect(contains(json, "\"connected_at\":123460"), "client connected time missing");
+    ok &= expect(contains(json, "\"media\":{\"active\":true"), "client media missing");
+    ok &= expect(contains(json, "\"title\":\"song \\\"one\\\"\""), "media title missing");
+    ok &= expect(contains(json, "\"artist\":\"artist\""), "media artist missing");
+    ok &= expect(contains(json, "\"album\":\"album\""), "media album missing");
+    ok &= expect(contains(json, "\"artwork_type\":\"image/jpeg\""), "media artwork type missing");
+    ok &= expect(contains(json, "\"artwork_bytes\":321"), "media artwork bytes missing");
+    ok &= expect(contains(json, "\"position_ms\":42000"), "media position missing");
+    ok &= expect(contains(json, "\"duration_ms\":180000"), "media duration missing");
+    ok &= expect(contains(json, "\"volume_db\":-12.5"), "media volume db missing");
+    ok &= expect(contains(json, "\"volume_linear\":0.237"), "media linear volume missing");
     ok &= expect(contains(json, "\"streams\":[{"), "client streams missing");
     ok &= expect(contains(json, "\"kind\":\"audio\""), "audio stream missing");
     ok &= expect(contains(json, "\"health\":\"clean\""), "audio health missing");

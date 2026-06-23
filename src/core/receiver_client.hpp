@@ -28,6 +28,19 @@ struct receiver_client_stream_status {
     uint64_t decode_failures = 0;
 };
 
+struct receiver_client_media_status {
+    bool active = false;
+    std::string title;
+    std::string artist;
+    std::string album;
+    std::string artwork_type;
+    uint64_t artwork_bytes = 0;
+    uint64_t position_ms = 0;
+    uint64_t duration_ms = 0;
+    float volume_db = 0.0F;
+    float volume_linear = 1.0F;
+};
+
 struct receiver_client_status {
     uint64_t id = 0;
     protocol protocol_id = protocol::airplay;
@@ -35,6 +48,7 @@ struct receiver_client_status {
     std::string address;
     std::string state = "connected";
     int64_t connected_at = 0;
+    receiver_client_media_status media;
     std::vector<receiver_client_stream_status> streams;
 };
 
@@ -48,6 +62,11 @@ public:
                                        receiver_client_stream_status stream) {
         static_cast<void>(client_id);
         static_cast<void>(stream);
+    }
+    virtual void client_media_updated(uint64_t client_id,
+                                      receiver_client_media_status media) {
+        static_cast<void>(client_id);
+        static_cast<void>(media);
     }
 };
 

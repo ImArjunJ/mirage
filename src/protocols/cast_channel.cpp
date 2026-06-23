@@ -314,6 +314,7 @@ io::task<void> cast_receiver::run() {
                     .address = socket.remote_endpoint().addr.to_string(),
                     .state = "connected",
                     .connected_at = 0,
+                    .media = {},
                     .streams = {},
                 });
                 impl_->observer->client_stream_updated(client_status_id,
