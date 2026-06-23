@@ -609,6 +609,14 @@ void rtsp_session::reset_audio_packet_state() {
     audio_resend_control_seqnum_ = 0;
     airplay_media_.reset_audio_packets();
 }
+void rtsp_session::finish_audio_stream() {
+    if (!audio_stream_active_) {
+        return;
+    }
+    media_sink_->on_audio_teardown();
+    audio_stream_active_ = false;
+    audio_stream_closing_ = false;
+}
 void rtsp_session::close_audio_stream() {
     if (audio_data_socket_) {
         audio_data_socket_->close();
@@ -616,8 +624,11 @@ void rtsp_session::close_audio_stream() {
     if (audio_control_socket_) {
         audio_control_socket_->close();
     }
-    media_sink_->on_audio_teardown();
-    audio_receiver_started_ = false;
+    if (audio_receiver_started_) {
+        audio_stream_closing_ = true;
+    } else {
+        finish_audio_stream();
+    }
 }
 void rtsp_session::close_video_stream() {
     if (mirror_acceptor_) {
@@ -1250,6 +1261,8 @@ bool rtsp_session::configure_audio_decoder() {
         return false;
     }
     media_sink_->on_audio_volume(audio_volume_db_, audio_linear_volume_);
+    audio_stream_active_ = true;
+    audio_stream_closing_ = false;
     return true;
 }
 io::task<result<rtsp_response>> rtsp_session::handle_setup(const rtsp_request& req) {
@@ -1817,12 +1830,13 @@ io::task<void> rtsp_session::run_audio_receiver() {
         }
     } catch (const std::system_error& e) {
         if (audio_receiver_started_ && state_ != rtsp_session_state::teardown &&
+            !audio_stream_closing_ &&
             e.code() != std::errc::operation_canceled) {
             mirage::log::debug("Audio receiver ended: {}", e.what());
         }
     }
 
-    media_sink_->on_audio_teardown();
+    finish_audio_stream();
     auto stats = airplay_media_.audio_stats();
     auto summary = make_audio_summary(stats);
     log_receiver_audio_summary(source_, summary);
@@ -1830,6 +1844,7 @@ io::task<void> rtsp_session::run_audio_receiver() {
         observer_->client_stream_updated(client_status_id_, make_audio_client_stream(summary));
     }
     audio_receiver_started_ = false;
+    audio_stream_closing_ = false;
 }
 io::task<void> rtsp_session::run_audio_control_receiver() {
     if (!audio_control_socket_) {
@@ -1869,6 +1884,7 @@ io::task<void> rtsp_session::run_audio_control_receiver() {
         }
     } catch (const std::system_error& e) {
         if (audio_receiver_started_ && state_ != rtsp_session_state::teardown &&
+            !audio_stream_closing_ &&
             e.code() != std::errc::operation_canceled) {
             mirage::log::debug("Audio control receiver ended: {}", e.what());
         }

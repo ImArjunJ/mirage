@@ -18,7 +18,7 @@ with socket.socket() as sock:
 PY
 )
 fi
-iterations=${MIRAGE_SMOKE_ITERATIONS:-1}
+iterations=${MIRAGE_SMOKE_ITERATIONS:-2}
 tmpdir=$(mktemp -d)
 pid=
 

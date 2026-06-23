@@ -67,6 +67,7 @@ private:
     bool configure_audio_decoder();
     io::task<void> send_audio_resend_request(uint16_t start_seqnum, uint16_t count);
     void reset_audio_packet_state();
+    void finish_audio_stream();
     void close_audio_stream();
     void close_video_stream();
     void close_stream_sockets();
@@ -94,6 +95,8 @@ private:
     bool base_receivers_started_ = false;
     bool mirror_receiver_started_ = false;
     bool audio_receiver_started_ = false;
+    bool audio_stream_active_ = false;
+    bool audio_stream_closing_ = false;
     uint64_t stream_connection_id_ = 0;
     uint8_t audio_ct_ = 0;
     int audio_sample_rate_ = airplay::default_sample_rate;
