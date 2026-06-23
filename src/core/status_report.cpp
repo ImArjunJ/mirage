@@ -82,6 +82,8 @@ std::string render_status_json(const receiver_status_report& report) {
             out << ",\"audio\":" << json_bool(caps.audio);
             out << ",\"video\":" << json_bool(caps.video);
             out << ",\"remote_control\":" << json_bool(caps.remote_control);
+            out << ",\"app_lifecycle\":" << json_bool(caps.app_lifecycle);
+            out << ",\"media_control\":" << json_bool(caps.media_control);
             out << ",\"metadata\":" << json_bool(caps.metadata);
             out << "}";
         }

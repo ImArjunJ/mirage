@@ -43,6 +43,8 @@ int main() {
                     .audio = true,
                     .video = true,
                     .remote_control = true,
+                    .app_lifecycle = false,
+                    .media_control = true,
                     .metadata = true,
                     .transport = "rtsp/raop",
                 },
@@ -52,11 +54,13 @@ int main() {
             .port = 8009,
             .enabled = true,
             .experimental = true,
-            .detail = "cast v2 probe receiver",
+            .detail = "cast v2 control/status receiver",
             .capabilities =
                 {
                     .network_listener = true,
                     .discovery = true,
+                    .remote_control = true,
+                    .app_lifecycle = true,
                     .transport = "cast-v2",
                 },
         },
@@ -116,8 +120,10 @@ int main() {
     ok &= expect(contains(json, "\"advertised\":true"), "advertised state missing");
     ok &= expect(contains(json, "\"transport\":\"rtsp/raop\""), "airplay transport missing");
     ok &= expect(contains(json, "\"audio\":true"), "audio capability missing");
+    ok &= expect(contains(json, "\"media_control\":true"), "media control capability missing");
     ok &= expect(contains(json, "\"metadata\":true"), "metadata capability missing");
     ok &= expect(contains(json, "\"id\":\"cast\""), "cast protocol missing");
+    ok &= expect(contains(json, "\"app_lifecycle\":true"), "app lifecycle capability missing");
     ok &= expect(contains(json, "\"state\":\"error\""), "cast error state missing");
     ok &= expect(contains(json, "\"detail\":\"bind \\\"failed\\\"\""),
                  "escaped error detail missing");

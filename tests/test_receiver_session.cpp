@@ -53,6 +53,8 @@ public:
             .audio = true,
             .video = true,
             .remote_control = true,
+            .app_lifecycle = true,
+            .media_control = true,
             .metadata = true,
             .transport = "test",
         };
@@ -108,6 +110,8 @@ int main() {
     ok &= expect(capabilities.discovery, "session discovery capability mismatch");
     ok &= expect(capabilities.audio, "session audio capability mismatch");
     ok &= expect(capabilities.video, "session video capability mismatch");
+    ok &= expect(capabilities.app_lifecycle, "session app lifecycle capability mismatch");
+    ok &= expect(capabilities.media_control, "session media control capability mismatch");
     ok &= expect(capabilities.transport == "test", "session transport mismatch");
 
     auto started = session->start(adapters, discovery);

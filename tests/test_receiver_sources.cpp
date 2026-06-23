@@ -77,6 +77,8 @@ bool expect_audio_video_remote_metadata(const mirage::receiver_source_descriptor
     ok &= expect(source.capabilities.audio, "source audio capability mismatch");
     ok &= expect(source.capabilities.video, "source video capability mismatch");
     ok &= expect(source.capabilities.remote_control, "source remote control capability mismatch");
+    ok &= expect(!source.capabilities.app_lifecycle, "source app lifecycle capability mismatch");
+    ok &= expect(source.capabilities.media_control, "source media control capability mismatch");
     ok &= expect(source.capabilities.metadata, "source metadata capability mismatch");
     ok &= expect(source.capabilities.transport == transport, "source transport mismatch");
     return ok;
@@ -90,6 +92,8 @@ bool expect_no_media_capabilities(const mirage::receiver_source_descriptor& sour
     ok &= expect(!source.capabilities.audio, "source audio capability mismatch");
     ok &= expect(!source.capabilities.video, "source video capability mismatch");
     ok &= expect(!source.capabilities.remote_control, "source remote control capability mismatch");
+    ok &= expect(!source.capabilities.app_lifecycle, "source app lifecycle capability mismatch");
+    ok &= expect(!source.capabilities.media_control, "source media control capability mismatch");
     ok &= expect(!source.capabilities.metadata, "source metadata capability mismatch");
     ok &= expect(source.capabilities.transport == transport, "source transport mismatch");
     return ok;
@@ -157,6 +161,8 @@ int main() {
     ok &= expect(!cast->capabilities.audio, "cast audio capability mismatch");
     ok &= expect(!cast->capabilities.video, "cast video capability mismatch");
     ok &= expect(cast->capabilities.remote_control, "cast remote control capability mismatch");
+    ok &= expect(cast->capabilities.app_lifecycle, "cast app lifecycle capability mismatch");
+    ok &= expect(!cast->capabilities.media_control, "cast media control capability mismatch");
     ok &= expect(!cast->capabilities.metadata, "cast metadata capability mismatch");
     ok &= expect(cast->capabilities.transport == "cast-v2", "cast transport mismatch");
 

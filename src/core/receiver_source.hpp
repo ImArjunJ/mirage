@@ -47,6 +47,8 @@ struct receiver_source_capabilities {
     bool audio = false;
     bool video = false;
     bool remote_control = false;
+    bool app_lifecycle = false;
+    bool media_control = false;
     bool metadata = false;
     std::string_view transport;
 };

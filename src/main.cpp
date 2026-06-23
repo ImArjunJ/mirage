@@ -601,6 +601,8 @@ int handle_status(bool verbose) {
         };
         append("audio", "audio");
         append("video", "video");
+        append("app_lifecycle", "apps");
+        append("media_control", "media");
         append("remote_control", "remote");
         append("metadata", "metadata");
         return summary;
@@ -608,7 +610,7 @@ int handle_status(bool verbose) {
 
     auto is_default_protocol_detail = [](std::string_view detail) {
         return detail == "disabled by config" || detail == "rtsp/raop receiver" ||
-               detail == "cast v2 probe receiver" || detail == "wfd capability listener";
+               detail == "cast v2 control/status receiver" || detail == "wfd capability listener";
     };
 
     auto name = extract_string("name");

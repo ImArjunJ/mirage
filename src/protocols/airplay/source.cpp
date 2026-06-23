@@ -55,6 +55,8 @@ receiver_source_descriptor make_airplay_receiver_source(const config& cfg) {
                 .audio = true,
                 .video = true,
                 .remote_control = true,
+                .app_lifecycle = false,
+                .media_control = true,
                 .metadata = true,
                 .transport = "rtsp/raop",
             },

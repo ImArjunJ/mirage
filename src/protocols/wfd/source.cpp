@@ -32,6 +32,8 @@ receiver_source_descriptor make_wfd_receiver_source(const config& cfg) {
                 .audio = false,
                 .video = false,
                 .remote_control = false,
+                .app_lifecycle = false,
+                .media_control = false,
                 .metadata = false,
                 .transport = "wfd",
             },

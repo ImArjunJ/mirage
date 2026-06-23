@@ -40,6 +40,8 @@ receiver_source_descriptor make_cast_receiver_source(const config& cfg) {
                 .audio = false,
                 .video = false,
                 .remote_control = true,
+                .app_lifecycle = true,
+                .media_control = false,
                 .metadata = false,
                 .transport = "cast-v2",
             },
