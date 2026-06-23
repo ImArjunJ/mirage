@@ -83,6 +83,7 @@ find_program(GLSLC glslc HINTS ${Vulkan_GLSLC_EXECUTABLE} REQUIRED)
 
 set(SHADER_DIR ${CMAKE_SOURCE_DIR}/src/render/shaders)
 set(SHADER_OUT ${CMAKE_BINARY_DIR}/shaders)
+set(MIRAGE_INSTALL_SHADER_DIR ${CMAKE_INSTALL_DATADIR}/mirage/shaders)
 file(MAKE_DIRECTORY ${SHADER_OUT})
 
 foreach(SHADER nv12_to_rgb.vert nv12_to_rgb.frag)
@@ -96,8 +97,7 @@ foreach(SHADER nv12_to_rgb.vert nv12_to_rgb.frag)
     list(APPEND SHADER_OUTPUTS ${SHADER_OUT}/${SHADER}.spv)
 endforeach()
 
-add_executable(mirage
-    src/main.cpp
+set(MIRAGE_CORE_SOURCES
     src/core/error.cpp
     src/core/cli_options.cpp
     src/core/config.cpp
@@ -108,6 +108,9 @@ add_executable(mirage
     src/core/runtime_process.cpp
     src/core/runtime_status.cpp
     src/core/status_report.cpp
+)
+
+set(MIRAGE_CRYPTO_SOURCES
     src/crypto/ed25519_keypair.cpp
     src/crypto/fairplay_pairing.cpp
     src/crypto/fairplay_sap.cpp
@@ -115,9 +118,15 @@ add_executable(mirage
     src/crypto/srp6a.cpp
     src/crypto/aes_ctr.cpp
     src/crypto/tlv8_chacha.cpp
+)
+
+set(MIRAGE_DISCOVERY_SOURCES
     src/discovery/mdns_broadcaster.cpp
     src/discovery/service_records.cpp
     src/discovery/interface_enum.cpp
+)
+
+set(MIRAGE_MEDIA_SOURCES
     src/media/local_media_sink.cpp
     src/media/vaapi_decoder.cpp
     src/media/nvdec_decoder.cpp
@@ -125,6 +134,9 @@ add_executable(mirage
     src/audio/audio_player.cpp
     src/audio/audio_decoder.cpp
     src/render/vulkan_renderer.cpp
+)
+
+set(MIRAGE_PROTOCOL_SOURCES
     src/protocols/rtsp_server.cpp
     src/protocols/rtsp_message.cpp
     src/protocols/cast_channel.cpp
@@ -144,10 +156,33 @@ add_executable(mirage
     src/protocols/cast/receiver_session.cpp
     src/protocols/wfd/source.cpp
     src/protocols/wfd/receiver_session.cpp
+)
+
+set(MIRAGE_IO_SOURCES
     src/io/tcp.cpp
     src/io/udp.cpp
+)
+
+set(MIRAGE_PLATFORM_SOURCES
     src/platform/window.cpp
     src/platform/audio_out.cpp
+)
+
+function(mirage_apply_target_defaults target)
+    target_include_directories(${target} PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_options(${target} PRIVATE ${MIRAGE_CXX_FLAGS})
+    target_link_options(${target} PRIVATE ${MIRAGE_LINK_FLAGS})
+endfunction()
+
+add_executable(mirage
+    src/main.cpp
+    ${MIRAGE_CORE_SOURCES}
+    ${MIRAGE_CRYPTO_SOURCES}
+    ${MIRAGE_DISCOVERY_SOURCES}
+    ${MIRAGE_MEDIA_SOURCES}
+    ${MIRAGE_PROTOCOL_SOURCES}
+    ${MIRAGE_IO_SOURCES}
+    ${MIRAGE_PLATFORM_SOURCES}
     ${SHADER_OUTPUTS}
 )
 
@@ -167,14 +202,13 @@ else()
     )
 endif()
 
-target_include_directories(mirage PRIVATE ${CMAKE_SOURCE_DIR}/src)
+mirage_apply_target_defaults(mirage)
 if(EXISTS /opt/cuda/include)
     target_include_directories(mirage SYSTEM PRIVATE /opt/cuda/include)
 endif()
-target_compile_options(mirage PRIVATE ${MIRAGE_CXX_FLAGS})
-target_link_options(mirage PRIVATE ${MIRAGE_LINK_FLAGS})
 target_compile_definitions(mirage PRIVATE
-    MIRAGE_SHADER_DIR="${SHADER_OUT}"
+    MIRAGE_BUILD_SHADER_DIR="${SHADER_OUT}"
+    MIRAGE_INSTALL_SHADER_DIR="${MIRAGE_INSTALL_SHADER_DIR}"
     MIRAGE_VERSION="${PROJECT_VERSION}"
 )
 
@@ -191,152 +225,99 @@ if(WIN32)
 endif()
 
 install(TARGETS mirage RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(FILES ${SHADER_OUTPUTS} DESTINATION ${MIRAGE_INSTALL_SHADER_DIR})
 install(FILES README.md LICENSE DESTINATION ${CMAKE_INSTALL_DOCDIR})
 
 include(CTest)
 if(BUILD_TESTING)
-    add_executable(mirage_srp6a_test
+    function(mirage_add_unit_test test_name target)
+        add_executable(${target} ${ARGN})
+        mirage_apply_target_defaults(${target})
+        add_test(NAME ${test_name} COMMAND ${target})
+    endfunction()
+
+    mirage_add_unit_test(srp6a mirage_srp6a_test
         tests/test_srp6a.cpp
         src/crypto/srp6a.cpp
     )
-    target_include_directories(mirage_srp6a_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_compile_options(mirage_srp6a_test PRIVATE ${MIRAGE_CXX_FLAGS})
-    target_link_options(mirage_srp6a_test PRIVATE ${MIRAGE_LINK_FLAGS})
     target_link_libraries(mirage_srp6a_test PRIVATE OpenSSL::Crypto)
-    add_test(NAME srp6a COMMAND mirage_srp6a_test)
 
-    add_executable(mirage_airplay_protocol_test
+    mirage_add_unit_test(airplay_protocol mirage_airplay_protocol_test
         tests/test_airplay_protocol.cpp
     )
-    target_include_directories(mirage_airplay_protocol_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_compile_options(mirage_airplay_protocol_test PRIVATE ${MIRAGE_CXX_FLAGS})
-    target_link_options(mirage_airplay_protocol_test PRIVATE ${MIRAGE_LINK_FLAGS})
-    add_test(NAME airplay_protocol COMMAND mirage_airplay_protocol_test)
 
-    add_executable(mirage_airplay_media_metadata_test
+    mirage_add_unit_test(airplay_media_metadata mirage_airplay_media_metadata_test
         tests/test_airplay_media_metadata.cpp
         src/protocols/airplay/media_metadata.cpp
     )
-    target_include_directories(mirage_airplay_media_metadata_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_compile_options(mirage_airplay_media_metadata_test PRIVATE ${MIRAGE_CXX_FLAGS})
-    target_link_options(mirage_airplay_media_metadata_test PRIVATE ${MIRAGE_LINK_FLAGS})
-    add_test(NAME airplay_media_metadata COMMAND mirage_airplay_media_metadata_test)
 
-    add_executable(mirage_airplay_rtsp_state_test
+    mirage_add_unit_test(airplay_rtsp_state mirage_airplay_rtsp_state_test
         tests/test_airplay_rtsp_state.cpp
         src/protocols/airplay/rtsp_state.cpp
     )
-    target_include_directories(mirage_airplay_rtsp_state_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_compile_options(mirage_airplay_rtsp_state_test PRIVATE ${MIRAGE_CXX_FLAGS})
-    target_link_options(mirage_airplay_rtsp_state_test PRIVATE ${MIRAGE_LINK_FLAGS})
-    add_test(NAME airplay_rtsp_state COMMAND mirage_airplay_rtsp_state_test)
 
-    add_executable(mirage_cast_probe_test
+    mirage_add_unit_test(cast_probe mirage_cast_probe_test
         tests/test_cast_probe.cpp
         src/protocols/cast/framing.cpp
         src/protocols/cast/probe.cpp
     )
-    target_include_directories(mirage_cast_probe_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_compile_options(mirage_cast_probe_test PRIVATE ${MIRAGE_CXX_FLAGS})
-    target_link_options(mirage_cast_probe_test PRIVATE ${MIRAGE_LINK_FLAGS})
-    add_test(NAME cast_probe COMMAND mirage_cast_probe_test)
 
-    add_executable(mirage_rtsp_message_test
+    mirage_add_unit_test(rtsp_message mirage_rtsp_message_test
         tests/test_rtsp_message.cpp
         src/protocols/rtsp_message.cpp
     )
-    target_include_directories(mirage_rtsp_message_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_compile_options(mirage_rtsp_message_test PRIVATE ${MIRAGE_CXX_FLAGS})
-    target_link_options(mirage_rtsp_message_test PRIVATE ${MIRAGE_LINK_FLAGS})
-    add_test(NAME rtsp_message COMMAND mirage_rtsp_message_test)
 
-    add_executable(mirage_cast_framing_test
+    mirage_add_unit_test(cast_framing mirage_cast_framing_test
         tests/test_cast_framing.cpp
         src/protocols/cast/framing.cpp
         src/protocols/cast/probe.cpp
     )
-    target_include_directories(mirage_cast_framing_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_compile_options(mirage_cast_framing_test PRIVATE ${MIRAGE_CXX_FLAGS})
-    target_link_options(mirage_cast_framing_test PRIVATE ${MIRAGE_LINK_FLAGS})
-    add_test(NAME cast_framing COMMAND mirage_cast_framing_test)
 
-    add_executable(mirage_cast_message_test
+    mirage_add_unit_test(cast_message mirage_cast_message_test
         tests/test_cast_message.cpp
         src/protocols/cast/message.cpp
     )
-    target_include_directories(mirage_cast_message_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_compile_options(mirage_cast_message_test PRIVATE ${MIRAGE_CXX_FLAGS})
-    target_link_options(mirage_cast_message_test PRIVATE ${MIRAGE_LINK_FLAGS})
-    add_test(NAME cast_message COMMAND mirage_cast_message_test)
 
-    add_executable(mirage_wfd_control_test
+    mirage_add_unit_test(wfd_control mirage_wfd_control_test
         tests/test_wfd_control.cpp
         src/protocols/wfd/control.cpp
         src/protocols/rtsp_message.cpp
     )
-    target_include_directories(mirage_wfd_control_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_compile_options(mirage_wfd_control_test PRIVATE ${MIRAGE_CXX_FLAGS})
-    target_link_options(mirage_wfd_control_test PRIVATE ${MIRAGE_LINK_FLAGS})
-    add_test(NAME wfd_control COMMAND mirage_wfd_control_test)
 
-    add_executable(mirage_receiver_adapter_test
+    mirage_add_unit_test(receiver_adapter mirage_receiver_adapter_test
         tests/test_receiver_adapter.cpp
         src/core/receiver_adapter.cpp
         src/core/receiver_source.cpp
     )
-    target_include_directories(mirage_receiver_adapter_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_compile_options(mirage_receiver_adapter_test PRIVATE ${MIRAGE_CXX_FLAGS})
-    target_link_options(mirage_receiver_adapter_test PRIVATE ${MIRAGE_LINK_FLAGS})
-    add_test(NAME receiver_adapter COMMAND mirage_receiver_adapter_test)
 
-    add_executable(mirage_status_report_test
+    mirage_add_unit_test(status_report mirage_status_report_test
         tests/test_status_report.cpp
         src/core/receiver_adapter.cpp
         src/core/status_report.cpp
     )
-    target_include_directories(mirage_status_report_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_compile_options(mirage_status_report_test PRIVATE ${MIRAGE_CXX_FLAGS})
-    target_link_options(mirage_status_report_test PRIVATE ${MIRAGE_LINK_FLAGS})
-    add_test(NAME status_report COMMAND mirage_status_report_test)
 
-    add_executable(mirage_config_test
+    mirage_add_unit_test(config mirage_config_test
         tests/test_config.cpp
         src/core/config.cpp
     )
-    target_include_directories(mirage_config_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_compile_options(mirage_config_test PRIVATE ${MIRAGE_CXX_FLAGS})
-    target_link_options(mirage_config_test PRIVATE ${MIRAGE_LINK_FLAGS})
-    add_test(NAME config COMMAND mirage_config_test)
 
-    add_executable(mirage_cli_options_test
+    mirage_add_unit_test(cli_options mirage_cli_options_test
         tests/test_cli_options.cpp
         src/core/cli_options.cpp
         src/core/config.cpp
     )
-    target_include_directories(mirage_cli_options_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_compile_options(mirage_cli_options_test PRIVATE ${MIRAGE_CXX_FLAGS})
-    target_link_options(mirage_cli_options_test PRIVATE ${MIRAGE_LINK_FLAGS})
-    add_test(NAME cli_options COMMAND mirage_cli_options_test)
 
-    add_executable(mirage_runtime_paths_test
+    mirage_add_unit_test(runtime_paths mirage_runtime_paths_test
         tests/test_runtime_paths.cpp
         src/core/runtime_paths.cpp
     )
-    target_include_directories(mirage_runtime_paths_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_compile_options(mirage_runtime_paths_test PRIVATE ${MIRAGE_CXX_FLAGS})
-    target_link_options(mirage_runtime_paths_test PRIVATE ${MIRAGE_LINK_FLAGS})
-    add_test(NAME runtime_paths COMMAND mirage_runtime_paths_test)
 
-    add_executable(mirage_runtime_process_test
+    mirage_add_unit_test(runtime_process mirage_runtime_process_test
         tests/test_runtime_process.cpp
         src/core/runtime_process.cpp
     )
-    target_include_directories(mirage_runtime_process_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_compile_options(mirage_runtime_process_test PRIVATE ${MIRAGE_CXX_FLAGS})
-    target_link_options(mirage_runtime_process_test PRIVATE ${MIRAGE_LINK_FLAGS})
-    add_test(NAME runtime_process COMMAND mirage_runtime_process_test)
 
-    add_executable(mirage_runtime_status_test
+    mirage_add_unit_test(runtime_status mirage_runtime_status_test
         tests/test_runtime_status.cpp
         src/core/runtime_process.cpp
         src/core/runtime_status.cpp
@@ -344,12 +325,8 @@ if(BUILD_TESTING)
         src/core/receiver_adapter.cpp
         src/core/receiver_source.cpp
     )
-    target_include_directories(mirage_runtime_status_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_compile_options(mirage_runtime_status_test PRIVATE ${MIRAGE_CXX_FLAGS})
-    target_link_options(mirage_runtime_status_test PRIVATE ${MIRAGE_LINK_FLAGS})
-    add_test(NAME runtime_status COMMAND mirage_runtime_status_test)
 
-    add_executable(mirage_receiver_sources_test
+    mirage_add_unit_test(receiver_sources mirage_receiver_sources_test
         tests/test_receiver_sources.cpp
         src/core/error.cpp
         src/protocols/receiver_sources.cpp
@@ -361,13 +338,9 @@ if(BUILD_TESTING)
         src/crypto/ed25519_keypair.cpp
         src/crypto/hash.cpp
     )
-    target_include_directories(mirage_receiver_sources_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_compile_options(mirage_receiver_sources_test PRIVATE ${MIRAGE_CXX_FLAGS})
-    target_link_options(mirage_receiver_sources_test PRIVATE ${MIRAGE_LINK_FLAGS})
     target_link_libraries(mirage_receiver_sources_test PRIVATE OpenSSL::Crypto)
-    add_test(NAME receiver_sources COMMAND mirage_receiver_sources_test)
 
-    add_executable(mirage_receiver_identity_test
+    mirage_add_unit_test(receiver_identity mirage_receiver_identity_test
         tests/test_receiver_identity.cpp
         src/core/receiver_identity.cpp
         src/core/error.cpp
@@ -375,41 +348,25 @@ if(BUILD_TESTING)
         src/crypto/ed25519_keypair.cpp
         src/crypto/hash.cpp
     )
-    target_include_directories(mirage_receiver_identity_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_compile_options(mirage_receiver_identity_test PRIVATE ${MIRAGE_CXX_FLAGS})
-    target_link_options(mirage_receiver_identity_test PRIVATE ${MIRAGE_LINK_FLAGS})
     target_link_libraries(mirage_receiver_identity_test PRIVATE OpenSSL::Crypto)
-    add_test(NAME receiver_identity COMMAND mirage_receiver_identity_test)
 
-    add_executable(mirage_receiver_session_test
+    mirage_add_unit_test(receiver_session mirage_receiver_session_test
         tests/test_receiver_session.cpp
         src/core/receiver_adapter.cpp
     )
-    target_include_directories(mirage_receiver_session_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_compile_options(mirage_receiver_session_test PRIVATE ${MIRAGE_CXX_FLAGS})
-    target_link_options(mirage_receiver_session_test PRIVATE ${MIRAGE_LINK_FLAGS})
-    add_test(NAME receiver_session COMMAND mirage_receiver_session_test)
 
-    add_executable(mirage_media_pipeline_test
+    mirage_add_unit_test(media_pipeline mirage_media_pipeline_test
         tests/test_media_pipeline.cpp
     )
-    target_include_directories(mirage_media_pipeline_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_compile_options(mirage_media_pipeline_test PRIVATE ${MIRAGE_CXX_FLAGS})
-    target_link_options(mirage_media_pipeline_test PRIVATE ${MIRAGE_LINK_FLAGS})
-    add_test(NAME media_pipeline COMMAND mirage_media_pipeline_test)
 
-    add_executable(mirage_airplay_media_source_test
+    mirage_add_unit_test(airplay_media_source mirage_airplay_media_source_test
         tests/test_airplay_media_source.cpp
         src/protocols/airplay/media_source.cpp
         src/crypto/aes_ctr.cpp
         src/crypto/fairplay_sap.cpp
         src/crypto/hash.cpp
     )
-    target_include_directories(mirage_airplay_media_source_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_compile_options(mirage_airplay_media_source_test PRIVATE ${MIRAGE_CXX_FLAGS})
-    target_link_options(mirage_airplay_media_source_test PRIVATE ${MIRAGE_LINK_FLAGS})
     target_link_libraries(mirage_airplay_media_source_test PRIVATE OpenSSL::Crypto)
-    add_test(NAME airplay_media_source COMMAND mirage_airplay_media_source_test)
 
     if(UNIX)
         add_test(NAME raop_smoke

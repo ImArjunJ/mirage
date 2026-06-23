@@ -71,6 +71,8 @@ jobs:
           ctest --test-dir build --output-on-failure
           cmake --install build --prefix install-smoke
           test -x install-smoke/bin/mirage
+          test -f install-smoke/share/mirage/shaders/nv12_to_rgb.vert.spv
+          test -f install-smoke/share/mirage/shaders/nv12_to_rgb.frag.spv
       - name: verify (windows)
         if: runner.os == 'Windows'
         run: |
@@ -81,6 +83,8 @@ jobs:
           ctest --test-dir build -C Release --output-on-failure
           cmake --install build --config Release --prefix install-smoke
           if (!(Test-Path install-smoke/bin/mirage.exe)) { throw "installed mirage.exe missing" }
+          if (!(Test-Path install-smoke/share/mirage/shaders/nv12_to_rgb.vert.spv)) { throw "installed vertex shader missing" }
+          if (!(Test-Path install-smoke/share/mirage/shaders/nv12_to_rgb.frag.spv)) { throw "installed fragment shader missing" }
       - name: upload artifact
         uses: actions/upload-artifact@v7
         with:

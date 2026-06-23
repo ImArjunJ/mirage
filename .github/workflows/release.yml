@@ -66,13 +66,17 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           mkdir -p mirage-${{ github.ref_name }}-${{ matrix.artifact }}
+          mkdir -p mirage-${{ github.ref_name }}-${{ matrix.artifact }}/shaders
           cp build/mirage README.md LICENSE mirage-${{ github.ref_name }}-${{ matrix.artifact }}/
+          cp build/shaders/*.spv mirage-${{ github.ref_name }}-${{ matrix.artifact }}/shaders/
           zip -r mirage-${{ github.ref_name }}-${{ matrix.artifact }}.zip mirage-${{ github.ref_name }}-${{ matrix.artifact }}/
       - name: package (windows)
         if: runner.os == 'Windows'
         run: |
           New-Item -ItemType Directory -Path mirage-${{ github.ref_name }}-${{ matrix.artifact }}
+          New-Item -ItemType Directory -Path mirage-${{ github.ref_name }}-${{ matrix.artifact }}/shaders
           Copy-Item build/Release/mirage.exe, README.md, LICENSE mirage-${{ github.ref_name }}-${{ matrix.artifact }}/
+          Copy-Item build/shaders/*.spv mirage-${{ github.ref_name }}-${{ matrix.artifact }}/shaders/
           Compress-Archive -Path mirage-${{ github.ref_name }}-${{ matrix.artifact }}/* -DestinationPath mirage-${{ github.ref_name }}-${{ matrix.artifact }}.zip
       - name: upload artifact
         uses: actions/upload-artifact@v7

@@ -21,11 +21,24 @@ discovery, control, and status before media rendering.
 ## build
 
 ```sh
+cmake --preset dev
+cmake --build --preset dev
+```
+
+or manually:
+
+```sh
 cmake -B build
 cmake --build build -j$(nproc)
 ```
 
 needs c++23, cmake 3.25+, openssl, ffmpeg, vulkan, and `glslc`.
+
+install:
+
+```sh
+cmake --install build --prefix ~/.local
+```
 
 ## run
 
@@ -81,7 +94,7 @@ identity_key = /path/to/identity.key
 ## test
 
 ```sh
-ctest --test-dir build --output-on-failure
+ctest --preset dev
 ```
 
 real-device smoke:

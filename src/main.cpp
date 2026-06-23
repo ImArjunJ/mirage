@@ -44,7 +44,7 @@ void signal_handler(int signal) {
 }
 
 void print_help() {
-    std::println(stderr, "mirage - airplay / cast / miracast receiver");
+    std::println(stderr, "mirage - local-network receiver");
     std::println(stderr, "");
     std::println(stderr, "usage:");
     std::println(stderr, "  mirage                      run in foreground");

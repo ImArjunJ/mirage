@@ -2,9 +2,12 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -13,6 +16,12 @@
 #include <vector>
 
 #include <vulkan/vulkan.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 #include "core/log.hpp"
 #include "media/media.hpp"
@@ -25,10 +34,66 @@ namespace {
 
 constexpr uint32_t max_frames_in_flight = 2;
 
-VkShaderModule load_shader_module(VkDevice device, const char* path) {
-    std::ifstream file(path, std::ios::ate | std::ios::binary);
+std::optional<std::filesystem::path> executable_dir() {
+#ifdef _WIN32
+    std::wstring buffer(MAX_PATH, L'\0');
+    DWORD size = 0;
+    for (;;) {
+        size = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (size == 0) {
+            return std::nullopt;
+        }
+        if (static_cast<size_t>(size) < buffer.size()) {
+            buffer.resize(static_cast<size_t>(size));
+            break;
+        }
+        buffer.resize(buffer.size() * 2);
+    }
+    return std::filesystem::path(buffer).parent_path();
+#else
+    std::array<char, 4096> buffer{};
+    const auto size = readlink("/proc/self/exe", buffer.data(), buffer.size() - 1);
+    if (size <= 0) {
+        return std::nullopt;
+    }
+    return std::filesystem::path(std::string(buffer.data(), static_cast<size_t>(size)))
+        .parent_path();
+#endif
+}
+
+std::optional<std::filesystem::path> locate_shader(std::string_view filename) {
+    std::vector<std::filesystem::path> search_dirs;
+    if (const char* env = std::getenv("MIRAGE_SHADER_DIR");
+        env != nullptr && env[0] != '\0') {
+        search_dirs.emplace_back(env);
+    }
+    if (auto exe_dir = executable_dir()) {
+        search_dirs.emplace_back(*exe_dir / "shaders");
+        search_dirs.emplace_back(*exe_dir / ".." / MIRAGE_INSTALL_SHADER_DIR);
+    }
+    search_dirs.emplace_back(MIRAGE_BUILD_SHADER_DIR);
+    search_dirs.emplace_back(std::filesystem::current_path() / "shaders");
+
+    for (const auto& dir : search_dirs) {
+        auto candidate = dir / filename;
+        std::error_code ec;
+        if (std::filesystem::exists(candidate, ec)) {
+            return candidate;
+        }
+    }
+    return std::nullopt;
+}
+
+VkShaderModule load_shader_module(VkDevice device, std::string_view filename) {
+    auto path = locate_shader(filename);
+    if (!path) {
+        mirage::log::error("Failed to find shader file: {}", filename);
+        return VK_NULL_HANDLE;
+    }
+
+    std::ifstream file(*path, std::ios::ate | std::ios::binary);
     if (!file.is_open()) {
-        mirage::log::error("Failed to open shader file: {}", path);
+        mirage::log::error("Failed to open shader file: {}", path->string());
         return VK_NULL_HANDLE;
     }
     auto file_size = static_cast<size_t>(file.tellg());
@@ -622,8 +687,8 @@ void render_window::thread_main(const std::string& title, uint32_t width, uint32
     VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
     vkCreatePipelineLayout(device, &pipeline_layout_info, nullptr, &pipeline_layout);
 
-    auto vert_module = load_shader_module(device, MIRAGE_SHADER_DIR "/nv12_to_rgb.vert.spv");
-    auto frag_module = load_shader_module(device, MIRAGE_SHADER_DIR "/nv12_to_rgb.frag.spv");
+    auto vert_module = load_shader_module(device, "nv12_to_rgb.vert.spv");
+    auto frag_module = load_shader_module(device, "nv12_to_rgb.frag.spv");
 
     std::array<VkPipelineShaderStageCreateInfo, 2> shader_stages{};
     shader_stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
