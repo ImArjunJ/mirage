@@ -110,8 +110,7 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
         b"Content-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body
     )
     response = recv_response(sock)
-    assert "RTSP/1.0 501 Media Not Implemented" in response, response
-    assert "wfd_error: media-not-implemented" in response, response
+    assert "RTSP/1.0 200 OK" in response, response
 
     sock.sendall(
         b"SETUP rtsp://127.0.0.1/wfd1.0/streamid=0 RTSP/1.0\r\n"
@@ -120,6 +119,8 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     response = recv_response(sock)
     assert "RTSP/1.0 501 Media Not Implemented" in response, response
     assert "wfd_error: media-not-implemented" in response, response
+    assert "method: SETUP" in response, response
+    assert "trigger: SETUP" in response, response
 PY
 
 kill -INT "${pid}"
@@ -127,4 +128,5 @@ wait "${pid}"
 pid=
 
 grep -q "Miracast stream setup: mode=capability_listener" "${tmpdir}/err"
-grep -q "Miracast stream summary: health=attention, reason=media_not_implemented" "${tmpdir}/err"
+grep -q "Miracast control: trigger=SETUP accepted, media=unsupported" "${tmpdir}/err"
+grep -q "Miracast stream summary: health=attention, reason=media_not_implemented, method=SETUP" "${tmpdir}/err"

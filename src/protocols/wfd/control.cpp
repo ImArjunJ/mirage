@@ -126,10 +126,23 @@ control_response make_simple_response(int code, std::string text) {
     return response;
 }
 
-control_response media_not_implemented() {
+control_response media_not_implemented(std::string_view method,
+                                       const std::optional<std::string>& pending_trigger) {
     auto response = make_simple_response(501, "Media Not Implemented");
     response.body = "wfd_error: media-not-implemented\r\n";
+    if (!method.empty()) {
+        response.body += "method: ";
+        response.body += method;
+        response.body += "\r\n";
+    }
+    if (pending_trigger && !pending_trigger->empty()) {
+        response.body += "trigger: ";
+        response.body += *pending_trigger;
+        response.body += "\r\n";
+    }
     response.headers.emplace_back("Content-Type", "text/parameters");
+    response.event = control_event::media_method_requested;
+    response.event_detail = std::string(method);
     return response;
 }
 
@@ -142,6 +155,8 @@ control_response parameter_not_understood(const set_parameter_analysis& analysis
         response.body += "\r\n";
     }
     response.headers.emplace_back("Content-Type", "text/parameters");
+    response.event = control_event::unsupported_parameter;
+    response.event_detail = analysis.parameter;
     return response;
 }
 
@@ -188,6 +203,13 @@ set_parameter_analysis analyze_set_parameters(std::string_view body) {
 
 result<control_response> handle_control_request(const rtsp_request_head& request,
                                                 std::string_view body) {
+    control_session_state state;
+    return handle_control_request(request, body, state);
+}
+
+result<control_response> handle_control_request(const rtsp_request_head& request,
+                                                std::string_view body,
+                                                control_session_state& state) {
     if (request.version != "RTSP/1.0") {
         return std::unexpected(mirage_error::network("unsupported WFD RTSP version"));
     }
@@ -208,25 +230,37 @@ result<control_response> handle_control_request(const rtsp_request_head& request
     if (request.method == "SET_PARAMETER") {
         const auto analysis = analyze_set_parameters(body);
         if (analysis.result == set_parameter_result::media_trigger) {
-            return media_not_implemented();
+            ++state.media_triggers;
+            state.pending_trigger = analysis.value;
+            auto response = make_simple_response(200, "OK");
+            response.headers.emplace_back("Supported", "org.wfa.wfd1.0");
+            response.event = control_event::media_trigger_requested;
+            response.event_detail = analysis.value;
+            return response;
         }
         if (analysis.result == set_parameter_result::unsupported_parameter) {
+            ++state.unsupported_parameters;
             return parameter_not_understood(analysis);
         }
+        ++state.accepted_parameter_sets;
         auto response = make_simple_response(200, "OK");
         response.headers.emplace_back("Supported", "org.wfa.wfd1.0");
+        response.event = control_event::parameters_accepted;
         return response;
     }
 
     if (request.method == "TEARDOWN") {
         auto response = make_simple_response(200, "OK");
         response.close_after_send = true;
+        response.event = control_event::teardown_requested;
+        state.teardown_requested = true;
         return response;
     }
 
     if (request.method == "SETUP" || request.method == "PLAY" || request.method == "PAUSE" ||
         request.method == "RECORD") {
-        return media_not_implemented();
+        ++state.media_methods;
+        return media_not_implemented(request.method, state.pending_trigger);
     }
 
     return make_simple_response(405, "Method Not Allowed");

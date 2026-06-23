@@ -62,6 +62,7 @@ io::task<result<std::string>> read_body(io::tcp_stream& socket, size_t content_l
 }
 
 io::task<void> handle_wfd_connection(io::tcp_stream socket) {
+    wfd::control_session_state state;
     try {
         while (socket.is_open()) {
             auto header = co_await socket.async_read_until("\r\n\r\n");
@@ -78,16 +79,26 @@ io::task<void> handle_wfd_connection(io::tcp_stream socket) {
             }
 
             mirage::log::debug("wfd: {} {} {}", parsed->method, parsed->uri, parsed->version);
-            auto response = wfd::handle_control_request(*parsed, *body);
+            auto response = wfd::handle_control_request(*parsed, *body, state);
             if (!response) {
                 mirage::log::debug("wfd: rejected request: {}", response.error().message);
                 co_return;
             }
             auto wire = wfd::serialize_control_response(*response, parsed->cseq);
             co_await socket.async_write(byte_view(wire));
-            if (response->status_code == 501) {
+            if (response->event == wfd::control_event::media_trigger_requested) {
                 mirage::log::diagnostic(
-                    "Miracast stream summary: health=attention, reason=media_not_implemented");
+                    "Miracast control: trigger={} accepted, media=unsupported",
+                    response->event_detail);
+            } else if (response->event == wfd::control_event::media_method_requested) {
+                mirage::log::diagnostic(
+                    "Miracast stream summary: health=attention, "
+                    "reason=media_not_implemented, method={}",
+                    response->event_detail);
+            } else if (response->event == wfd::control_event::unsupported_parameter) {
+                mirage::log::diagnostic(
+                    "Miracast control: unsupported_parameter={}",
+                    response->event_detail.empty() ? "unknown" : response->event_detail);
             }
             if (response->close_after_send) {
                 co_return;

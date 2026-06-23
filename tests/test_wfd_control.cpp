@@ -85,6 +85,8 @@ int main() {
                      mirage::protocols::wfd::set_parameter_result::unsupported_parameter,
                  "malformed SET_PARAMETER analysis mismatch");
 
+    mirage::protocols::wfd::control_session_state state;
+
     auto set = mirage::protocols::wfd::handle_control_request(
         request("SET_PARAMETER"), "wfd_client_rtp_ports: RTP/AVP/UDP;unicast 19000 0 mode=play\r\n");
     ok &= expect(set.has_value(), "SET_PARAMETER response missing");
@@ -93,37 +95,56 @@ int main() {
     }
 
     auto trigger = mirage::protocols::wfd::handle_control_request(
-        request("SET_PARAMETER"), "wfd_trigger_method: SETUP\r\n");
+        request("SET_PARAMETER"), "wfd_trigger_method: SETUP\r\n", state);
     ok &= expect(trigger.has_value(), "trigger SET_PARAMETER response missing");
     if (trigger) {
-        ok &= expect(trigger->status_code == 501,
-                     "trigger SET_PARAMETER should be explicit unsupported media");
-        ok &= expect(contains(trigger->body, "media-not-implemented"),
-                     "trigger unsupported detail missing");
+        ok &= expect(trigger->status_code == 200,
+                     "trigger SET_PARAMETER should be accepted before media setup");
+        ok &= expect(trigger->event ==
+                         mirage::protocols::wfd::control_event::media_trigger_requested,
+                     "trigger event mismatch");
+        ok &= expect(trigger->event_detail == "SETUP", "trigger event detail mismatch");
+        ok &= expect(state.pending_trigger && *state.pending_trigger == "SETUP",
+                     "trigger state mismatch");
+        ok &= expect(state.media_triggers == 1, "trigger count mismatch");
     }
 
     auto malformed = mirage::protocols::wfd::handle_control_request(
-        request("SET_PARAMETER"), "not-a-parameter\r\n");
+        request("SET_PARAMETER"), "not-a-parameter\r\n", state);
     ok &= expect(malformed.has_value(), "malformed SET_PARAMETER response missing");
     if (malformed) {
         ok &= expect(malformed->status_code == 451,
                      "malformed SET_PARAMETER status mismatch");
         ok &= expect(contains(malformed->body, "parameter-not-understood"),
                      "malformed SET_PARAMETER detail missing");
+        ok &= expect(malformed->event ==
+                         mirage::protocols::wfd::control_event::unsupported_parameter,
+                     "malformed SET_PARAMETER event mismatch");
+        ok &= expect(state.unsupported_parameters == 1, "unsupported parameter count mismatch");
     }
 
-    auto setup = mirage::protocols::wfd::handle_control_request(request("SETUP"), "");
+    auto setup = mirage::protocols::wfd::handle_control_request(request("SETUP"), "", state);
     ok &= expect(setup.has_value(), "SETUP response missing");
     if (setup) {
         ok &= expect(setup->status_code == 501, "SETUP should be explicit unsupported media");
         ok &= expect(contains(setup->body, "media-not-implemented"),
                      "SETUP unsupported detail missing");
+        ok &= expect(contains(setup->body, "method: SETUP"), "SETUP method detail missing");
+        ok &= expect(contains(setup->body, "trigger: SETUP"), "SETUP trigger detail missing");
+        ok &= expect(setup->event ==
+                         mirage::protocols::wfd::control_event::media_method_requested,
+                     "SETUP event mismatch");
+        ok &= expect(state.media_methods == 1, "media method count mismatch");
     }
 
-    auto teardown = mirage::protocols::wfd::handle_control_request(request("TEARDOWN"), "");
+    auto teardown = mirage::protocols::wfd::handle_control_request(request("TEARDOWN"), "", state);
     ok &= expect(teardown.has_value(), "TEARDOWN response missing");
     if (teardown) {
         ok &= expect(teardown->close_after_send, "TEARDOWN should close after send");
+        ok &= expect(teardown->event ==
+                         mirage::protocols::wfd::control_event::teardown_requested,
+                     "TEARDOWN event mismatch");
+        ok &= expect(state.teardown_requested, "TEARDOWN state mismatch");
     }
 
     auto invalid_version = request("OPTIONS");
