@@ -31,9 +31,10 @@ receiver_adapter_registry::receiver_adapter_registry(const config& cfg)
     : adapters_{
           make_adapter(protocol::airplay, cfg.enable_airplay, cfg.airplay_port, true,
                        "rtsp/raop receiver"),
-          make_adapter(protocol::cast, cfg.enable_cast, cfg.cast_port, true, "cast v2 receiver"),
+          make_adapter(protocol::cast, cfg.enable_cast, cfg.cast_port, true,
+                       "cast v2 probe receiver"),
           make_adapter(protocol::miracast, cfg.enable_miracast, cfg.miracast_port, true,
-                       "wfd receiver"),
+                       "wfd stub (not listening)"),
       } {}
 
 receiver_adapter_registry::receiver_adapter_registry(

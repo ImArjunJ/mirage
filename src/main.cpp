@@ -54,7 +54,7 @@ void print_help() {
     std::println(stderr, "  --miracast-port <port>");
     std::println(stderr, "                      miracast port (default: 7236)");
     std::println(stderr, "  --no-airplay        disable airplay");
-    std::println(stderr, "  --cast              enable experimental google cast stub");
+    std::println(stderr, "  --cast              enable experimental google cast probe adapter");
     std::println(stderr, "  --miracast          enable experimental miracast stub");
     std::println(stderr, "  --no-cast           disable google cast if enabled by config");
     std::println(stderr, "  --no-miracast       disable miracast if enabled by config");

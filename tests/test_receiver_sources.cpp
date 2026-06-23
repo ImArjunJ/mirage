@@ -74,6 +74,19 @@ bool expect_audio_video_remote_metadata(const mirage::receiver_source_descriptor
     return ok;
 }
 
+bool expect_no_media_capabilities(const mirage::receiver_source_descriptor& source,
+                                  std::string_view transport) {
+    bool ok = true;
+    ok &= expect(!source.capabilities.pairing, "source pairing capability mismatch");
+    ok &= expect(!source.capabilities.media_setup, "source media setup capability mismatch");
+    ok &= expect(!source.capabilities.audio, "source audio capability mismatch");
+    ok &= expect(!source.capabilities.video, "source video capability mismatch");
+    ok &= expect(!source.capabilities.remote_control, "source remote control capability mismatch");
+    ok &= expect(!source.capabilities.metadata, "source metadata capability mismatch");
+    ok &= expect(source.capabilities.transport == transport, "source transport mismatch");
+    return ok;
+}
+
 }  // namespace
 
 int main() {
@@ -117,8 +130,10 @@ int main() {
 
     ok &= expect(airplay->detail == std::string_view("rtsp/raop receiver"),
                  "airplay detail mismatch");
-    ok &= expect(cast->detail == std::string_view("cast v2 receiver"), "cast detail mismatch");
-    ok &= expect(wfd->detail == std::string_view("wfd receiver"), "miracast detail mismatch");
+    ok &= expect(cast->detail == std::string_view("cast v2 probe receiver"),
+                 "cast detail mismatch");
+    ok &= expect(wfd->detail == std::string_view("wfd stub (not listening)"),
+                 "miracast detail mismatch");
 
     ok &= expect(airplay->validate_source != nullptr, "airplay validator missing");
     ok &= expect(airplay->session_factory != nullptr, "airplay factory missing");
@@ -127,18 +142,13 @@ int main() {
 
     ok &= expect(airplay->capabilities.pairing, "airplay pairing capability mismatch");
     ok &= expect_audio_video_remote_metadata(*airplay, "rtsp/raop");
-    ok &= expect(!cast->capabilities.pairing, "cast pairing capability mismatch");
-    ok &= expect_audio_video_remote_metadata(*cast, "cast-v2");
+    ok &= expect(cast->capabilities.network_listener, "cast listener capability mismatch");
+    ok &= expect(cast->capabilities.discovery, "cast discovery capability mismatch");
+    ok &= expect_no_media_capabilities(*cast, "cast-v2");
 
     ok &= expect(!wfd->capabilities.network_listener, "miracast listener capability mismatch");
     ok &= expect(!wfd->capabilities.discovery, "miracast discovery capability mismatch");
-    ok &= expect(wfd->capabilities.pairing, "miracast pairing capability mismatch");
-    ok &= expect(wfd->capabilities.media_setup, "miracast media setup capability mismatch");
-    ok &= expect(wfd->capabilities.audio, "miracast audio capability mismatch");
-    ok &= expect(wfd->capabilities.video, "miracast video capability mismatch");
-    ok &= expect(wfd->capabilities.remote_control, "miracast remote control capability mismatch");
-    ok &= expect(!wfd->capabilities.metadata, "miracast metadata capability mismatch");
-    ok &= expect(wfd->capabilities.transport == "wfd", "miracast transport mismatch");
+    ok &= expect_no_media_capabilities(*wfd, "wfd");
 
     mirage::config custom;
     custom.enable_cast = true;

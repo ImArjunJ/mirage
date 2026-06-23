@@ -7,8 +7,9 @@ AirPlay, Google Cast, and Miracast / Wi-Fi Display. The core owns discovery,
 sessions, media setup, decode, rendering, audio output, diagnostics, and daemon
 state.
 
-Right now, AirPlay is the useful path. Cast and Miracast are still early
-adapters while the shared receiver model settles.
+Right now, AirPlay is the useful path. Cast has discovery and probe handling,
+but no media channel yet. Miracast is still a stub while the shared receiver
+model settles.
 
 ## status
 
@@ -52,8 +53,8 @@ Common options:
 --port <port>          AirPlay port, default 7000
 --no-mdns              disable built-in discovery
 --identity-key <file>  persistent receiver identity
---cast                 enable experimental Cast adapter
---miracast             enable experimental Miracast adapter
+--cast                 enable experimental Cast probe adapter
+--miracast             enable experimental Miracast stub
 ```
 
 ## config

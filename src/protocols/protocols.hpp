@@ -124,7 +124,7 @@ private:
 enum class cast_message_type : uint8_t { connect, close, heartbeat, get_status, launch_app, media };
 class cast_receiver {
 public:
-    static result<cast_receiver> bind(io::io_context& ctx, uint16_t port);
+    static result<cast_receiver> bind(io::io_context& ctx, uint16_t port, std::string device_name);
     io::task<void> run();
     void stop();
     ~cast_receiver();

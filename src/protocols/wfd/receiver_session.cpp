@@ -31,7 +31,7 @@ public:
         }
         session_.emplace(std::move(*session));
         adapters.mark_running(id());
-        log::info("miracast enabled (stub)");
+        log::diagnostic("Miracast stream setup: mode=stub, listener=none");
         return {};
     }
 

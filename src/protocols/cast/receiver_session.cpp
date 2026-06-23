@@ -28,7 +28,7 @@ public:
 
     result<void> start(receiver_adapter_registry& adapters,
                        discovery::service_publisher& publisher) override {
-        auto receiver = cast_receiver::bind(ctx_, source_.port);
+        auto receiver = cast_receiver::bind(ctx_, source_.port, device_name_);
         if (!receiver) {
             adapters.mark_error(id(), receiver.error().message);
             return std::unexpected(receiver.error());
@@ -36,7 +36,7 @@ public:
         receiver_.emplace(std::move(*receiver));
         adapters.mark_listening(id());
         publish_discovery(adapters, publisher);
-        log::info("cast receiver on port {}", source_.port);
+        log::diagnostic("Cast stream setup: mode=probe_only, port={}", source_.port);
         return {};
     }
 
@@ -69,7 +69,7 @@ private:
             return;
         }
         adapters.mark_advertised(id());
-        log::info("cast enabled on port {} (uuid: {})", source_.port, uuid_);
+        log::info("cast probe advertised on port {} (uuid: {})", source_.port, uuid_);
     }
 
     io::io_context& ctx_;
