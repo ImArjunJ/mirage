@@ -136,7 +136,7 @@ int main() {
     ok &= expect(cast->port == 8009, "cast default port mismatch");
     ok &= expect(wfd->port == 7236, "miracast default port mismatch");
 
-    ok &= expect(airplay->experimental, "airplay experimental flag mismatch");
+    ok &= expect(!airplay->experimental, "airplay experimental flag mismatch");
     ok &= expect(cast->experimental, "cast experimental flag mismatch");
     ok &= expect(wfd->experimental, "miracast experimental flag mismatch");
 

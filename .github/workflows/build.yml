@@ -66,6 +66,7 @@ jobs:
         run: |
           ./build/mirage --version
           ./build/mirage paths
+          ./build/mirage doctor --no-mdns
           ./build/mirage status
           ctest --test-dir build --output-on-failure
           cmake --install build --prefix install-smoke
@@ -75,6 +76,7 @@ jobs:
         run: |
           ./build/Release/mirage.exe --version
           ./build/Release/mirage.exe paths
+          ./build/Release/mirage.exe doctor --no-mdns
           ./build/Release/mirage.exe status
           ctest --test-dir build -C Release --output-on-failure
           cmake --install build --config Release --prefix install-smoke

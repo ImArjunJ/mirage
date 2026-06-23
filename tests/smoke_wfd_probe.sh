@@ -21,6 +21,25 @@ fi
 tmpdir=$(mktemp -d)
 pid=
 
+dump_failure() {
+    local code=$?
+    echo "wfd probe smoke failed; logs from ${tmpdir}" >&2
+    if [[ -f "${tmpdir}/out" ]]; then
+        echo "--- stdout ---" >&2
+        cat "${tmpdir}/out" >&2
+    fi
+    if [[ -f "${tmpdir}/err" ]]; then
+        echo "--- stderr ---" >&2
+        cat "${tmpdir}/err" >&2
+    fi
+    if [[ -f "${tmpdir}/state/mirage/status.json" ]]; then
+        echo "--- status.json ---" >&2
+        cat "${tmpdir}/state/mirage/status.json" >&2
+        echo >&2
+    fi
+    return "${code}"
+}
+
 cleanup() {
     if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
         kill -INT "${pid}" 2>/dev/null || true
@@ -28,6 +47,7 @@ cleanup() {
     fi
     rm -rf "${tmpdir}"
 }
+trap dump_failure ERR
 trap cleanup EXIT
 
 XDG_CONFIG_HOME="${tmpdir}/config" XDG_STATE_HOME="${tmpdir}/state" \
@@ -48,9 +68,27 @@ grep -q '"state":"listening"' "${status_json}"
 grep -q '"transport":"wfd"' "${status_json}"
 grep -q '"advertised":false' "${status_json}"
 
-python3 - "${port}" <<'PY'
+python3 - "${port}" "${status_json}" <<'PY'
+import pathlib
 import socket
 import sys
+import time
+
+
+status_path = pathlib.Path(sys.argv[2])
+
+
+def wait_status_contains(*needles):
+    last = ""
+    for _ in range(30):
+        try:
+            last = status_path.read_text()
+        except FileNotFoundError:
+            last = ""
+        if all(needle in last for needle in needles):
+            return
+        time.sleep(0.1)
+    raise AssertionError(f"status did not contain {needles}: {last}")
 
 
 def recv_response(sock):
@@ -74,6 +112,12 @@ def recv_response(sock):
 
 
 with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as sock:
+    wait_status_contains(
+        '"protocol":"miracast"',
+        '"kind":"control"',
+        '"health":"clean"',
+        '"reason":"connected"',
+    )
     sock.sendall(
         b"OPTIONS rtsp://127.0.0.1/wfd1.0 RTSP/1.0\r\n"
         b"CSeq: 1\r\n\r\n"
@@ -121,6 +165,12 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     assert "wfd_error: media-not-implemented" in response, response
     assert "method: SETUP" in response, response
     assert "trigger: SETUP" in response, response
+    wait_status_contains(
+        '"protocol":"miracast"',
+        '"kind":"media"',
+        '"health":"attention"',
+        '"reason":"media_not_implemented:SETUP"',
+    )
 PY
 
 kill -INT "${pid}"

@@ -43,6 +43,23 @@ std::span<const std::byte> byte_view(std::string_view data) {
     return std::as_bytes(std::span<const char>(data.data(), data.size()));
 }
 
+receiver_client_stream_status control_stream_status(std::string reason) {
+    return {
+        .kind = "control",
+        .health = "clean",
+        .reason = std::move(reason),
+    };
+}
+
+receiver_client_stream_status media_not_implemented_status(std::string_view method) {
+    return {
+        .kind = "media",
+        .health = "attention",
+        .reason = method.empty() ? "media_not_implemented" :
+                                   std::format("media_not_implemented:{}", method),
+    };
+}
+
 io::task<result<std::string>> read_body(io::tcp_stream& socket, size_t content_length) {
     std::string body;
     auto& leftover = socket.buffer();
@@ -61,7 +78,8 @@ io::task<result<std::string>> read_body(io::tcp_stream& socket, size_t content_l
     co_return body;
 }
 
-io::task<void> handle_wfd_connection(io::tcp_stream socket) {
+io::task<void> handle_wfd_connection(io::tcp_stream socket, receiver_session_observer* observer,
+                                     uint64_t client_status_id) {
     wfd::control_session_state state;
     try {
         while (socket.is_open()) {
@@ -87,10 +105,18 @@ io::task<void> handle_wfd_connection(io::tcp_stream socket) {
             auto wire = wfd::serialize_control_response(*response, parsed->cseq);
             co_await socket.async_write(byte_view(wire));
             if (response->event == wfd::control_event::media_trigger_requested) {
+                if (observer != nullptr && client_status_id != 0) {
+                    observer->client_stream_updated(client_status_id,
+                                                    control_stream_status("trigger_accepted"));
+                }
                 mirage::log::diagnostic(
                     "Miracast control: trigger={} accepted, media=unsupported",
                     response->event_detail);
             } else if (response->event == wfd::control_event::media_method_requested) {
+                if (observer != nullptr && client_status_id != 0) {
+                    observer->client_stream_updated(
+                        client_status_id, media_not_implemented_status(response->event_detail));
+                }
                 mirage::log::diagnostic(
                     "Miracast stream summary: health=attention, "
                     "reason=media_not_implemented, method={}",
@@ -114,7 +140,7 @@ io::task<void> handle_wfd_connection(io::tcp_stream socket) {
 io::task<void> handle_observed_wfd_connection(io::tcp_stream socket,
                                               receiver_session_observer* observer,
                                               uint64_t client_status_id) {
-    co_await handle_wfd_connection(std::move(socket));
+    co_await handle_wfd_connection(std::move(socket), observer, client_status_id);
     if (observer != nullptr && client_status_id != 0) {
         observer->client_disconnected(client_status_id);
     }
@@ -138,6 +164,8 @@ io::task<void> wfd_session::run() {
                     .connected_at = 0,
                     .streams = {},
                 });
+                impl_->observer->client_stream_updated(client_status_id,
+                                                       control_stream_status("connected"));
             }
             mirage::log::info("wfd connection from {}", socket.remote_endpoint().addr.to_string());
             io::co_spawn(impl_->acceptor.context(),

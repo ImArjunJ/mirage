@@ -128,7 +128,7 @@ int main() {
             .id = mirage::protocol::airplay,
             .port = 7000,
             .enabled = true,
-            .experimental = true,
+            .experimental = false,
             .detail = "rtsp/raop receiver",
             .capabilities = {.network_listener = true, .discovery = true, .transport = "rtsp"},
         },

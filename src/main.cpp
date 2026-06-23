@@ -50,6 +50,7 @@ void print_help() {
     std::println(stderr, "  mirage status               show current state");
     std::println(stderr, "  mirage status -v            show detailed state");
     std::println(stderr, "  mirage paths                show runtime file paths");
+    std::println(stderr, "  mirage doctor               check startup configuration");
     std::println(stderr, "");
     std::println(stderr, "options:");
     std::println(stderr, "  --name <name>       device name (default: Mirage)");
@@ -304,6 +305,217 @@ int handle_paths(int argc, char* argv[]) {
     std::println("status: {}", status_file_path().string());
     std::println("identity key: {}", identity_key_path(cfg).string());
     return 0;
+}
+
+std::string capability_summary(const mirage::receiver_source_capabilities& capabilities) {
+    std::string summary;
+    auto append = [&](bool enabled, std::string_view label) {
+        if (!enabled) {
+            return;
+        }
+        if (!summary.empty()) {
+            summary += "/";
+        }
+        summary += label;
+    };
+    append(capabilities.audio, "audio");
+    append(capabilities.video, "video");
+    append(capabilities.app_lifecycle, "apps");
+    append(capabilities.media_control, "media");
+    append(capabilities.remote_control, "remote");
+    append(capabilities.metadata, "metadata");
+    return summary.empty() ? "control" : summary;
+}
+
+bool is_config_value_option(std::string_view arg) {
+    return arg == "--config" || arg == "--name" || arg == "--port" || arg == "--cast-port" ||
+           arg == "--miracast-port" || arg == "--identity-key";
+}
+
+int handle_doctor(int argc, char* argv[]) {
+    mirage::config cfg;
+    auto config_path = default_config_file_path();
+    bool explicit_config = false;
+    bool no_mdns = false;
+    bool daemon_mode = false;
+
+    for (int i = 2; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--help" || arg == "-h") {
+            std::println("usage: mirage doctor [runtime options]");
+            std::println("");
+            std::println("checks config, enabled receivers, paths, ports, and network state.");
+            return 0;
+        }
+        if (arg == "--config") {
+            if (i + 1 >= argc) {
+                std::println(stderr, "missing value for --config");
+                return 2;
+            }
+            config_path = argv[++i];
+            explicit_config = true;
+        } else if (is_config_value_option(arg)) {
+            if (i + 1 >= argc) {
+                std::println(stderr, "missing value for {}", arg);
+                return 2;
+            }
+            ++i;
+        }
+    }
+
+    const bool config_exists = std::filesystem::exists(config_path);
+    if (config_exists) {
+        auto loaded = mirage::config::load_from_file(config_path.string());
+        if (!loaded) {
+            std::println(stderr, "failed to load config: {}", loaded.error().message);
+            return 1;
+        }
+        cfg = *loaded;
+    } else if (explicit_config) {
+        std::println(stderr, "config file not found: {}", config_path.string());
+        return 1;
+    }
+
+    for (int i = 2; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--config") {
+            ++i;
+        } else if (arg == "--name" && i + 1 < argc) {
+            cfg.device_name = argv[++i];
+        } else if (arg == "--port") {
+            auto parsed = parse_port_argument(arg, argv[++i]);
+            if (!parsed) {
+                std::println(stderr, "{}", parsed.error().message);
+                return 2;
+            }
+            cfg.airplay_port = *parsed;
+        } else if (arg == "--cast-port") {
+            auto parsed = parse_port_argument(arg, argv[++i]);
+            if (!parsed) {
+                std::println(stderr, "{}", parsed.error().message);
+                return 2;
+            }
+            cfg.cast_port = *parsed;
+        } else if (arg == "--miracast-port") {
+            auto parsed = parse_port_argument(arg, argv[++i]);
+            if (!parsed) {
+                std::println(stderr, "{}", parsed.error().message);
+                return 2;
+            }
+            cfg.miracast_port = *parsed;
+        } else if (arg == "--identity-key" && i + 1 < argc) {
+            cfg.identity_key_path = argv[++i];
+        } else if (arg == "--no-airplay") {
+            cfg.enable_airplay = false;
+        } else if (arg == "--cast") {
+            cfg.enable_cast = true;
+        } else if (arg == "--miracast") {
+            cfg.enable_miracast = true;
+        } else if (arg == "--no-cast") {
+            cfg.enable_cast = false;
+        } else if (arg == "--no-miracast") {
+            cfg.enable_miracast = false;
+        } else if (arg == "--no-mdns") {
+            no_mdns = true;
+        } else if (arg == "--daemon" || arg == "-d") {
+            daemon_mode = true;
+        } else if (arg == "--diagnostics" || arg == "--debug" || arg == "--trace" ||
+                   arg == "--verbose" || arg == "-v") {
+            continue;
+        } else if (arg == "--help" || arg == "-h") {
+            continue;
+        } else {
+            std::println(stderr, "unknown doctor option: {}", arg);
+            return 2;
+        }
+    }
+
+    const auto sources = mirage::protocols::make_receiver_source_descriptors(cfg);
+    bool ok = true;
+    std::println("mirage doctor");
+    std::println("config: {}{}", config_path.string(), config_exists ? "" : " (not found)");
+    std::println("state: {}", state_dir().string());
+    std::println("identity key: {}", identity_key_path(cfg).string());
+    std::println("mode: {}", daemon_mode ? "daemon" : "foreground");
+    std::println("mdns: {}", no_mdns ? "disabled" : "enabled");
+    std::println("protocols:");
+
+    for (const auto& source : sources) {
+        std::string line = std::format("  {}: {}", mirage::protocol_id(source.id),
+                                       source.enabled ? "enabled" : "disabled");
+        if (source.port != 0) {
+            line += std::format(", port {}", source.port);
+        }
+        if (!source.capabilities.transport.empty()) {
+            line += std::format(", {}", source.capabilities.transport);
+        }
+        if (source.enabled) {
+            line += std::format(", {}", capability_summary(source.capabilities));
+        }
+        if (source.experimental) {
+            line += ", experimental";
+        }
+        if (!source.detail.empty()) {
+            line += std::format(", {}", source.detail);
+        }
+        std::println("{}", line);
+    }
+
+    auto enabled_count = std::ranges::count_if(sources, [](const auto& source) {
+        return source.enabled;
+    });
+    if (enabled_count == 0) {
+        ok = false;
+        std::println("check: no receiver protocols enabled");
+    }
+
+    for (size_t i = 0; i < sources.size(); ++i) {
+        if (!sources[i].enabled || sources[i].port == 0) {
+            continue;
+        }
+        for (size_t j = i + 1; j < sources.size(); ++j) {
+            if (sources[j].enabled && sources[j].port == sources[i].port) {
+                ok = false;
+                std::println("check: {} and {} share port {}", mirage::protocol_id(sources[i].id),
+                             mirage::protocol_id(sources[j].id), sources[i].port);
+            }
+        }
+    }
+
+    auto interfaces = mirage::discovery::enumerate_interfaces();
+    if (!interfaces) {
+        ok = false;
+        std::println("network: {}", interfaces.error().message);
+    } else {
+        std::optional<mirage::discovery::network_interface> selected;
+        for (const auto& iface : *interfaces) {
+            if (!iface.is_loopback && iface.is_up && !iface.mac_address.empty()) {
+                selected = iface;
+                break;
+            }
+        }
+        if (selected) {
+            std::string address;
+            for (const auto& addr : selected->addresses) {
+                if (addr.is_v4()) {
+                    address = addr.to_string();
+                    break;
+                }
+            }
+            if (address.empty()) {
+                std::println("network: {} up, no ipv4 address", selected->name);
+            } else {
+                std::println("network: {} {}", selected->name, address);
+            }
+        } else {
+            ok = false;
+            std::println("network: no usable non-loopback interface");
+        }
+    }
+
+    std::println("dependencies: openssl linked, ffmpeg linked, vulkan linked");
+    std::println("result: {}", ok ? "ready" : "attention");
+    return ok ? 0 : 1;
 }
 
 std::optional<int> read_pid_file() {
@@ -1101,6 +1313,9 @@ int main(int argc, char* argv[]) {
         }
         if (subcmd == "paths") {
             return handle_paths(argc, argv);
+        }
+        if (subcmd == "doctor") {
+            return handle_doctor(argc, argv);
         }
     }
 

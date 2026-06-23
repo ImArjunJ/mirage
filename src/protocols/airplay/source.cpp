@@ -44,7 +44,7 @@ receiver_source_descriptor make_airplay_receiver_source(const config& cfg) {
         .id = protocol::airplay,
         .port = cfg.airplay_port,
         .enabled = cfg.enable_airplay,
-        .experimental = true,
+        .experimental = false,
         .detail = "rtsp/raop receiver",
         .capabilities =
             {

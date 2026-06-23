@@ -36,6 +36,7 @@ needs c++23, cmake 3.25+, openssl, ffmpeg, vulkan, and `glslc`.
 common modes:
 
 ```sh
+./build/mirage doctor
 ./build/mirage --diagnostics
 ./build/mirage --debug
 ./build/mirage --daemon

@@ -51,6 +51,14 @@ std::span<const std::byte> byte_view(std::string_view data) {
     return std::as_bytes(std::span<const char>(data.data(), data.size()));
 }
 
+receiver_client_stream_status control_stream_status(std::string reason) {
+    return {
+        .kind = "control",
+        .health = "clean",
+        .reason = std::move(reason),
+    };
+}
+
 io::task<bool> write_cast_frame(io::tcp_stream& socket, std::span<const std::byte> frame) {
     co_await socket.async_write(frame);
     co_return true;
@@ -228,6 +236,8 @@ io::task<void> cast_receiver::run() {
                     .connected_at = 0,
                     .streams = {},
                 });
+                impl_->observer->client_stream_updated(client_status_id,
+                                                       control_stream_status("connected"));
             }
             mirage::log::info("cast probe connection from {}",
                               socket.remote_endpoint().addr.to_string());

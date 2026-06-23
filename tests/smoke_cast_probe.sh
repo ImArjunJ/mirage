@@ -21,6 +21,25 @@ fi
 tmpdir=$(mktemp -d)
 pid=
 
+dump_failure() {
+    local code=$?
+    echo "cast probe smoke failed; logs from ${tmpdir}" >&2
+    if [[ -f "${tmpdir}/out" ]]; then
+        echo "--- stdout ---" >&2
+        cat "${tmpdir}/out" >&2
+    fi
+    if [[ -f "${tmpdir}/err" ]]; then
+        echo "--- stderr ---" >&2
+        cat "${tmpdir}/err" >&2
+    fi
+    if [[ -f "${tmpdir}/state/mirage/status.json" ]]; then
+        echo "--- status.json ---" >&2
+        cat "${tmpdir}/state/mirage/status.json" >&2
+        echo >&2
+    fi
+    return "${code}"
+}
+
 cleanup() {
     if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
         kill -INT "${pid}" 2>/dev/null || true
@@ -28,6 +47,7 @@ cleanup() {
     fi
     rm -rf "${tmpdir}"
 }
+trap dump_failure ERR
 trap cleanup EXIT
 
 XDG_CONFIG_HOME="${tmpdir}/config" XDG_STATE_HOME="${tmpdir}/state" \
@@ -60,11 +80,29 @@ printf "%s" "${response}" | grep -q "HTTP/1.1 200 OK"
 printf "%s" "${response}" | grep -q '"receiver":"cast-v2"'
 printf "%s" "${response}" | grep -q '"status":"control_ready"'
 
-python3 - "${port}" <<'PY'
+python3 - "${port}" "${status_json}" <<'PY'
+import pathlib
 import socket
 import ssl
 import struct
 import sys
+import time
+
+
+status_path = pathlib.Path(sys.argv[2])
+
+
+def wait_status_contains(*needles):
+    last = ""
+    for _ in range(30):
+        try:
+            last = status_path.read_text()
+        except FileNotFoundError:
+            last = ""
+        if all(needle in last for needle in needles):
+            return
+        time.sleep(0.1)
+    raise AssertionError(f"status did not contain {needles}: {last}")
 
 
 def varint(value):
@@ -111,6 +149,12 @@ def recv_exact(sock, count):
 
 
 with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as sock:
+    wait_status_contains(
+        '"protocol":"cast"',
+        '"kind":"control"',
+        '"health":"clean"',
+        '"reason":"connected"',
+    )
     sock.sendall(
         cast_message(
             "urn:x-cast:com.google.cast.receiver",
