@@ -99,6 +99,7 @@ endforeach()
 add_executable(mirage
     src/main.cpp
     src/core/error.cpp
+    src/core/cli_options.cpp
     src/core/config.cpp
     src/core/receiver_identity.cpp
     src/core/receiver_adapter.cpp
@@ -304,6 +305,16 @@ if(BUILD_TESTING)
     target_compile_options(mirage_config_test PRIVATE ${MIRAGE_CXX_FLAGS})
     target_link_options(mirage_config_test PRIVATE ${MIRAGE_LINK_FLAGS})
     add_test(NAME config COMMAND mirage_config_test)
+
+    add_executable(mirage_cli_options_test
+        tests/test_cli_options.cpp
+        src/core/cli_options.cpp
+        src/core/config.cpp
+    )
+    target_include_directories(mirage_cli_options_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_options(mirage_cli_options_test PRIVATE ${MIRAGE_CXX_FLAGS})
+    target_link_options(mirage_cli_options_test PRIVATE ${MIRAGE_LINK_FLAGS})
+    add_test(NAME cli_options COMMAND mirage_cli_options_test)
 
     add_executable(mirage_runtime_paths_test
         tests/test_runtime_paths.cpp

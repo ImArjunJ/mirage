@@ -1,6 +1,5 @@
 #include <algorithm>
 #include <array>
-#include <charconv>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
@@ -27,6 +26,7 @@
 #endif
 
 #include "core/core.hpp"
+#include "core/cli_options.hpp"
 #include "core/log.hpp"
 #include "core/receiver_adapter.hpp"
 #include "core/receiver_session.hpp"
@@ -99,6 +99,18 @@ void drain_shutdown_work(mirage::io::io_context& ctx) {
     }
 }
 
+std::vector<std::string_view> argv_view(int argc, char* argv[], int first) {
+    std::vector<std::string_view> args;
+    for (int i = first; i < argc; ++i) {
+        args.emplace_back(argv[i]);
+    }
+    return args;
+}
+
+void print_cli_error(const mirage::cli_error& error) {
+    std::println(stderr, "{}", error.message);
+}
+
 std::filesystem::path state_dir() {
     return mirage::runtime_state_dir(mirage::current_runtime_path_environment());
 }
@@ -142,18 +154,6 @@ std::string trim_ascii(std::string value) {
         value.erase(0, start);
     }
     return value;
-}
-
-mirage::result<uint16_t> parse_port_argument(std::string_view option, std::string_view value) {
-    uint32_t parsed = 0;
-    const auto* begin = value.data();
-    const auto* end = value.data() + value.size();
-    auto [ptr, ec] = std::from_chars(begin, end, parsed);
-    if (ec != std::errc{} || ptr != end || parsed > 65535) {
-        return std::unexpected(mirage::mirage_error::config_err(
-            std::format("{} expects a port from 0 to 65535, got '{}'", option, value)));
-    }
-    return static_cast<uint16_t>(parsed);
 }
 
 bool write_identity_key(const std::filesystem::path& path,
@@ -230,33 +230,30 @@ mirage::result<mirage::crypto::ed25519_keypair> load_or_create_identity_keypair(
 
 int handle_paths(int argc, char* argv[]) {
     mirage::config cfg;
-    auto config_path = default_config_file_path();
-    bool explicit_config = false;
-
-    for (int i = 2; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg == "--config" && i + 1 < argc) {
-            config_path = argv[++i];
-            explicit_config = true;
-        } else if (arg == "--help" || arg == "-h") {
+    auto args = argv_view(argc, argv, 2);
+    for (auto arg : args) {
+        if (arg == "--help" || arg == "-h") {
             std::println("usage: mirage paths [--config <file>]");
             return 0;
-        } else {
-            std::println(stderr, "unknown paths option: {}", arg);
-            return 2;
         }
     }
+    auto parsed = mirage::parse_paths_cli_options(args, default_config_file_path());
+    if (!parsed) {
+        print_cli_error(parsed.error());
+        return parsed.error().exit_code();
+    }
+    auto config_path = parsed->config_path;
 
     const bool config_exists = std::filesystem::exists(config_path);
     if (config_exists) {
         auto loaded = mirage::config::load_from_file(config_path.string());
         if (loaded) {
             cfg = *loaded;
-        } else if (explicit_config) {
+        } else if (parsed->explicit_config) {
             std::println(stderr, "failed to load config: {}", loaded.error().message);
             return 1;
         }
-    } else if (explicit_config) {
+    } else if (parsed->explicit_config) {
         std::println(stderr, "config file not found: {}", config_path.string());
         return 1;
     }
@@ -289,117 +286,33 @@ std::string capability_summary(const mirage::receiver_source_capabilities& capab
     return summary.empty() ? "control" : summary;
 }
 
-bool is_config_value_option(std::string_view arg) {
-    return arg == "--config" || arg == "--name" || arg == "--port" || arg == "--cast-port" ||
-           arg == "--miracast-port" || arg == "--identity-key";
-}
-
 int handle_doctor(int argc, char* argv[]) {
-    mirage::config cfg;
-    auto config_path = default_config_file_path();
-    bool explicit_config = false;
-    bool no_mdns = false;
-    bool daemon_mode = false;
-
-    for (int i = 2; i < argc; ++i) {
-        std::string arg = argv[i];
+    auto args = argv_view(argc, argv, 2);
+    for (auto arg : args) {
         if (arg == "--help" || arg == "-h") {
             std::println("usage: mirage doctor [runtime options]");
             std::println("");
             std::println("checks config, enabled receivers, paths, ports, and network state.");
             return 0;
         }
-        if (arg == "--config") {
-            if (i + 1 >= argc) {
-                std::println(stderr, "missing value for --config");
-                return 2;
-            }
-            config_path = argv[++i];
-            explicit_config = true;
-        } else if (is_config_value_option(arg)) {
-            if (i + 1 >= argc) {
-                std::println(stderr, "missing value for {}", arg);
-                return 2;
-            }
-            ++i;
-        }
     }
 
-    const bool config_exists = std::filesystem::exists(config_path);
-    if (config_exists) {
-        auto loaded = mirage::config::load_from_file(config_path.string());
-        if (!loaded) {
-            std::println(stderr, "failed to load config: {}", loaded.error().message);
-            return 1;
-        }
-        cfg = *loaded;
-    } else if (explicit_config) {
-        std::println(stderr, "config file not found: {}", config_path.string());
-        return 1;
+    auto parsed = mirage::parse_runtime_cli_options(args, default_config_file_path());
+    if (!parsed) {
+        print_cli_error(parsed.error());
+        return parsed.error().exit_code();
     }
-
-    for (int i = 2; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg == "--config") {
-            ++i;
-        } else if (arg == "--name" && i + 1 < argc) {
-            cfg.device_name = argv[++i];
-        } else if (arg == "--port") {
-            auto parsed = parse_port_argument(arg, argv[++i]);
-            if (!parsed) {
-                std::println(stderr, "{}", parsed.error().message);
-                return 2;
-            }
-            cfg.airplay_port = *parsed;
-        } else if (arg == "--cast-port") {
-            auto parsed = parse_port_argument(arg, argv[++i]);
-            if (!parsed) {
-                std::println(stderr, "{}", parsed.error().message);
-                return 2;
-            }
-            cfg.cast_port = *parsed;
-        } else if (arg == "--miracast-port") {
-            auto parsed = parse_port_argument(arg, argv[++i]);
-            if (!parsed) {
-                std::println(stderr, "{}", parsed.error().message);
-                return 2;
-            }
-            cfg.miracast_port = *parsed;
-        } else if (arg == "--identity-key" && i + 1 < argc) {
-            cfg.identity_key_path = argv[++i];
-        } else if (arg == "--no-airplay") {
-            cfg.enable_airplay = false;
-        } else if (arg == "--cast") {
-            cfg.enable_cast = true;
-        } else if (arg == "--miracast") {
-            cfg.enable_miracast = true;
-        } else if (arg == "--no-cast") {
-            cfg.enable_cast = false;
-        } else if (arg == "--no-miracast") {
-            cfg.enable_miracast = false;
-        } else if (arg == "--no-mdns") {
-            no_mdns = true;
-        } else if (arg == "--daemon" || arg == "-d") {
-            daemon_mode = true;
-        } else if (arg == "--diagnostics" || arg == "--debug" || arg == "--trace" ||
-                   arg == "--verbose" || arg == "-v") {
-            continue;
-        } else if (arg == "--help" || arg == "-h") {
-            continue;
-        } else {
-            std::println(stderr, "unknown doctor option: {}", arg);
-            return 2;
-        }
-    }
+    const auto& cfg = parsed->cfg;
 
     const auto sources = mirage::protocols::make_receiver_source_descriptors(cfg);
     bool ok = true;
     std::println("mirage doctor");
-    std::println("config: {}{}", config_path.string(), config_exists ? "" : " (not found)");
+    std::println("config: {}{}", parsed->config_path.string(),
+                 parsed->config_exists ? "" : " (not found)");
     std::println("state: {}", state_dir().string());
     std::println("identity key: {}", identity_key_path(cfg).string());
-    std::println("mode: {}", daemon_mode ? "daemon" : "foreground");
-    std::println("mdns: {}", no_mdns ? "disabled" : "enabled");
+    std::println("mode: {}", parsed->daemon_mode ? "daemon" : "foreground");
+    std::println("mdns: {}", parsed->no_mdns ? "disabled" : "enabled");
     std::println("protocols:");
 
     for (const auto& source : sources) {
@@ -680,16 +593,8 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    mirage::config cfg;
-    std::string config_file;
-    bool debug = false;
-    bool trace = false;
-    bool diagnostics = false;
-    bool verbose = false;
-    bool no_mdns = false;
-    bool daemon_mode = false;
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
+    auto args = argv_view(argc, argv, 1);
+    for (auto arg : args) {
         if (arg == "--help" || arg == "-h") {
             print_help();
             return 0;
@@ -698,97 +603,17 @@ int main(int argc, char* argv[]) {
             std::println("mirage {}", MIRAGE_VERSION);
             return 0;
         }
-        if (arg == "--config" && i + 1 < argc) {
-            config_file = argv[++i];
-        } else if ((arg == "--name" || arg == "--port" || arg == "--cast-port" ||
-                    arg == "--miracast-port" || arg == "--identity-key") &&
-                   i + 1 < argc) {
-            ++i;
-        }
     }
-    if (config_file.empty()) {
-        auto default_config = default_config_file_path();
-        if (std::filesystem::exists(default_config)) {
-            config_file = default_config.string();
-        }
-    }
-    if (!config_file.empty()) {
-        auto loaded = mirage::config::load_from_file(config_file);
-        if (loaded) {
-            cfg = *loaded;
-        } else {
-            std::println(stderr, "failed to load config: {}", loaded.error().message);
-            return 1;
-        }
-    }
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg == "--config" && i + 1 < argc) {
-            ++i;
-        } else if (arg == "--name" && i + 1 < argc) {
-            cfg.device_name = argv[++i];
-        } else if (arg == "--port") {
-            if (i + 1 >= argc) {
-                std::println(stderr, "missing value for --port");
-                return 2;
-            }
-            auto parsed = parse_port_argument(arg, argv[++i]);
-            if (!parsed) {
-                std::println(stderr, "{}", parsed.error().message);
-                return 2;
-            }
-            cfg.airplay_port = *parsed;
-        } else if (arg == "--cast-port") {
-            if (i + 1 >= argc) {
-                std::println(stderr, "missing value for --cast-port");
-                return 2;
-            }
-            auto parsed = parse_port_argument(arg, argv[++i]);
-            if (!parsed) {
-                std::println(stderr, "{}", parsed.error().message);
-                return 2;
-            }
-            cfg.cast_port = *parsed;
-        } else if (arg == "--miracast-port") {
-            if (i + 1 >= argc) {
-                std::println(stderr, "missing value for --miracast-port");
-                return 2;
-            }
-            auto parsed = parse_port_argument(arg, argv[++i]);
-            if (!parsed) {
-                std::println(stderr, "{}", parsed.error().message);
-                return 2;
-            }
-            cfg.miracast_port = *parsed;
-        } else if (arg == "--identity-key" && i + 1 < argc) {
-            cfg.identity_key_path = argv[++i];
-        } else if (arg == "--no-airplay") {
-            cfg.enable_airplay = false;
-        } else if (arg == "--cast") {
-            cfg.enable_cast = true;
-        } else if (arg == "--miracast") {
-            cfg.enable_miracast = true;
-        } else if (arg == "--no-cast") {
-            cfg.enable_cast = false;
-        } else if (arg == "--no-miracast") {
-            cfg.enable_miracast = false;
-        } else if (arg == "--verbose" || arg == "-v") {
-            verbose = true;
-        } else if (arg == "--debug") {
-            debug = true;
-        } else if (arg == "--trace") {
-            trace = true;
-        } else if (arg == "--diagnostics") {
-            diagnostics = true;
-        } else if (arg == "--no-mdns") {
-            no_mdns = true;
-        } else if (arg == "--daemon" || arg == "-d") {
-            daemon_mode = true;
-        }
-    }
-    setup_logging(verbose, debug, trace, diagnostics);
 
-    if (daemon_mode) {
+    auto parsed = mirage::parse_runtime_cli_options(args, default_config_file_path());
+    if (!parsed) {
+        print_cli_error(parsed.error());
+        return parsed.error().exit_code();
+    }
+    const auto cfg = parsed->cfg;
+    setup_logging(parsed->verbose, parsed->debug, parsed->trace, parsed->diagnostics);
+
+    if (parsed->daemon_mode) {
 #ifdef _WIN32
         if (!daemonize()) {
             return 1;
@@ -799,10 +624,10 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 #endif
-        setup_logging(verbose, debug, trace, diagnostics);
+        setup_logging(parsed->verbose, parsed->debug, parsed->trace, parsed->diagnostics);
     }
-    bool owns_runtime_files = daemon_mode;
-    if (!daemon_mode) {
+    bool owns_runtime_files = parsed->daemon_mode;
+    if (!parsed->daemon_mode) {
         if (!claim_runtime_for_process(mirage::current_process_id())) {
             return 1;
         }
@@ -860,7 +685,7 @@ int main(int argc, char* argv[]) {
         std::optional<mirage::discovery::mdns_service_publisher> mdns_publisher;
         mirage::discovery::disabled_service_publisher disabled_discovery;
         mirage::discovery::service_publisher* discovery = &disabled_discovery;
-        if (!no_mdns) {
+        if (!parsed->no_mdns) {
             mdns.emplace(ctx);
             mdns_publisher.emplace(*mdns);
             discovery = &*mdns_publisher;
@@ -949,7 +774,7 @@ int main(int argc, char* argv[]) {
                 mirage::log::user("  {} enabled", mirage::protocol_id(source.id));
             }
         }
-        if (!daemon_mode) {
+        if (!parsed->daemon_mode) {
             mirage::log::user("  press ctrl+c to stop.");
         }
         while (signal_received == 0) {
