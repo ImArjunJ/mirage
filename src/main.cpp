@@ -32,6 +32,7 @@
 #include "core/receiver_session.hpp"
 #include "core/runtime_paths.hpp"
 #include "core/runtime_process.hpp"
+#include "core/runtime_status.hpp"
 #include "core/status_report.hpp"
 #include "crypto/crypto.hpp"
 #include "discovery/discovery.hpp"
@@ -522,165 +523,6 @@ int handle_status(bool verbose) {
     return 0;
 }
 
-bool write_status_json(int pid, const mirage::config& cfg, const std::string& ip,
-                       const std::string& iface_name, const std::filesystem::path& identity_path,
-                       int64_t started,
-                       std::span<const mirage::receiver_adapter_status> adapters,
-                       std::span<const mirage::receiver_source_descriptor> sources,
-                       std::span<const mirage::receiver_client_status> clients) {
-    auto path = status_file_path();
-    auto tmp_path = path;
-    tmp_path += ".tmp";
-    auto identity_key = identity_path.string();
-    std::error_code ec;
-    std::filesystem::create_directories(path.parent_path(), ec);
-    if (ec) {
-        mirage::log::warn("could not create status directory {}: {}", path.parent_path().string(),
-                          ec.message());
-        return false;
-    }
-    std::ofstream f(tmp_path, std::ios::trunc);
-    if (!f) {
-        mirage::log::warn("could not write status file: {}", tmp_path.string());
-        return false;
-    }
-    f << mirage::render_status_json({
-        .pid = pid,
-        .name = cfg.device_name,
-        .ip = ip,
-        .interface_name = iface_name,
-        .identity_key = identity_key,
-        .airplay_port = cfg.airplay_port,
-        .cast_port = cfg.cast_port,
-        .miracast_port = cfg.miracast_port,
-        .started = started,
-        .adapters = adapters,
-        .sources = sources,
-        .clients = clients,
-    });
-    f.close();
-    if (!f) {
-        mirage::log::warn("could not finish writing status file: {}", tmp_path.string());
-        std::filesystem::remove(tmp_path, ec);
-        return false;
-    }
-
-    std::filesystem::rename(tmp_path, path, ec);
-    if (ec) {
-        std::error_code remove_ec;
-        std::filesystem::remove(path, remove_ec);
-        ec.clear();
-        std::filesystem::rename(tmp_path, path, ec);
-    }
-    if (ec) {
-        mirage::log::warn("could not publish status file {}: {}", path.string(), ec.message());
-        std::filesystem::remove(tmp_path, ec);
-        return false;
-    }
-    return true;
-}
-
-class runtime_status_tracker final : public mirage::receiver_session_observer {
-public:
-    runtime_status_tracker(int pid, const mirage::config& cfg, std::string ip,
-                           std::string iface_name, std::filesystem::path identity_path,
-                           int64_t started,
-                           mirage::receiver_adapter_registry& adapters,
-                           std::span<const mirage::receiver_source_descriptor> sources)
-        : pid_(pid),
-          cfg_(cfg),
-          ip_(std::move(ip)),
-          iface_name_(std::move(iface_name)),
-          identity_path_(std::move(identity_path)),
-          started_(started),
-          adapters_(adapters),
-          sources_(sources) {}
-
-    uint64_t client_connected(mirage::receiver_client_status client) override {
-        client.id = next_client_id_++;
-        if (client.name.empty()) {
-            client.name = std::string(mirage::protocol_id(client.protocol_id));
-        }
-        if (client.connected_at == 0) {
-            client.connected_at = std::chrono::system_clock::to_time_t(
-                std::chrono::system_clock::now());
-        }
-
-        clients_.push_back(std::move(client));
-        adapters_.mark_running(clients_.back().protocol_id);
-        write();
-        return clients_.back().id;
-    }
-
-    void client_disconnected(uint64_t client_id) override {
-        auto it = std::ranges::find(clients_, client_id, &mirage::receiver_client_status::id);
-        if (it == clients_.end()) {
-            return;
-        }
-
-        const auto protocol_id = it->protocol_id;
-        clients_.erase(it);
-        if (!has_client(protocol_id)) {
-            if (auto* adapter = adapters_.find(protocol_id);
-                adapter != nullptr && adapter->state == mirage::receiver_adapter_state::running) {
-                adapters_.mark_listening(protocol_id);
-            }
-        }
-        write();
-    }
-
-    void client_stream_updated(uint64_t client_id,
-                               mirage::receiver_client_stream_status stream) override {
-        auto client = std::ranges::find(clients_, client_id, &mirage::receiver_client_status::id);
-        if (client == clients_.end()) {
-            return;
-        }
-
-        auto existing = std::ranges::find(client->streams, stream.kind,
-                                          &mirage::receiver_client_stream_status::kind);
-        if (existing == client->streams.end()) {
-            client->streams.push_back(std::move(stream));
-        } else {
-            *existing = std::move(stream);
-        }
-        write();
-    }
-
-    void client_media_updated(uint64_t client_id,
-                              mirage::receiver_client_media_status media) override {
-        auto client = std::ranges::find(clients_, client_id, &mirage::receiver_client_status::id);
-        if (client == clients_.end()) {
-            return;
-        }
-
-        client->media = std::move(media);
-        write();
-    }
-
-    bool write() {
-        return write_status_json(pid_, cfg_, ip_, iface_name_, identity_path_, started_,
-                                 adapters_.all(), sources_, clients_);
-    }
-
-private:
-    bool has_client(mirage::protocol protocol_id) const {
-        return std::ranges::any_of(clients_, [&](const auto& client) {
-            return client.protocol_id == protocol_id;
-        });
-    }
-
-    int pid_;
-    const mirage::config& cfg_;
-    std::string ip_;
-    std::string iface_name_;
-    std::filesystem::path identity_path_;
-    int64_t started_ = 0;
-    mirage::receiver_adapter_registry& adapters_;
-    std::span<const mirage::receiver_source_descriptor> sources_;
-    std::vector<mirage::receiver_client_status> clients_;
-    uint64_t next_client_id_ = 1;
-};
-
 void print_receiver_start_error(mirage::protocol id, uint16_t port,
                                 const mirage::mirage_error& error) {
     switch (id) {
@@ -1027,9 +869,9 @@ int main(int argc, char* argv[]) {
         std::vector<std::unique_ptr<mirage::receiver_session>> receiver_sessions;
         const auto started_at =
             std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-        runtime_status_tracker status_tracker(mirage::current_process_id(), cfg, local_ip,
-                                              iface_name, receiver_identity_path, started_at,
-                                              adapters, receiver_sources.all());
+        mirage::runtime_status_tracker status_tracker(
+            status_file_path(), mirage::current_process_id(), cfg, local_ip, iface_name,
+            receiver_identity_path, started_at, adapters, receiver_sources.all());
         const mirage::receiver_source_runtime receiver_runtime{
             .io_context = &ctx,
             .receiver_identity = &*keypair,
@@ -1064,7 +906,7 @@ int main(int argc, char* argv[]) {
             }
             start_receiver_session(std::move(*session));
         }
-        status_tracker.write();
+        static_cast<void>(status_tracker.write());
         if (receiver_sessions.empty()) {
             if (receiver_sources.enabled().empty()) {
                 std::println(stderr, "no receiver protocols are enabled.");

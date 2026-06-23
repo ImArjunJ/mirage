@@ -105,6 +105,7 @@ add_executable(mirage
     src/core/receiver_source.cpp
     src/core/runtime_paths.cpp
     src/core/runtime_process.cpp
+    src/core/runtime_status.cpp
     src/core/status_report.cpp
     src/crypto/fairplay_pairing.cpp
     src/crypto/fairplay_sap.cpp
@@ -321,6 +322,19 @@ if(BUILD_TESTING)
     target_compile_options(mirage_runtime_process_test PRIVATE ${MIRAGE_CXX_FLAGS})
     target_link_options(mirage_runtime_process_test PRIVATE ${MIRAGE_LINK_FLAGS})
     add_test(NAME runtime_process COMMAND mirage_runtime_process_test)
+
+    add_executable(mirage_runtime_status_test
+        tests/test_runtime_status.cpp
+        src/core/runtime_process.cpp
+        src/core/runtime_status.cpp
+        src/core/status_report.cpp
+        src/core/receiver_adapter.cpp
+        src/core/receiver_source.cpp
+    )
+    target_include_directories(mirage_runtime_status_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_options(mirage_runtime_status_test PRIVATE ${MIRAGE_CXX_FLAGS})
+    target_link_options(mirage_runtime_status_test PRIVATE ${MIRAGE_LINK_FLAGS})
+    add_test(NAME runtime_status COMMAND mirage_runtime_status_test)
 
     add_executable(mirage_receiver_sources_test
         tests/test_receiver_sources.cpp
