@@ -132,7 +132,7 @@ int main() {
 
     ok &= expect(airplay->detail == std::string_view("rtsp/raop receiver"),
                  "airplay detail mismatch");
-    ok &= expect(cast->detail == std::string_view("cast v2 probe receiver"),
+    ok &= expect(cast->detail == std::string_view("cast v2 control/status receiver"),
                  "cast detail mismatch");
     ok &= expect(wfd->detail == std::string_view("wfd stub (not listening)"),
                  "miracast detail mismatch");
@@ -146,7 +146,13 @@ int main() {
     ok &= expect_audio_video_remote_metadata(*airplay, "rtsp/raop");
     ok &= expect(cast->capabilities.network_listener, "cast listener capability mismatch");
     ok &= expect(cast->capabilities.discovery, "cast discovery capability mismatch");
-    ok &= expect_no_media_capabilities(*cast, "cast-v2");
+    ok &= expect(!cast->capabilities.pairing, "cast pairing capability mismatch");
+    ok &= expect(!cast->capabilities.media_setup, "cast media setup capability mismatch");
+    ok &= expect(!cast->capabilities.audio, "cast audio capability mismatch");
+    ok &= expect(!cast->capabilities.video, "cast video capability mismatch");
+    ok &= expect(cast->capabilities.remote_control, "cast remote control capability mismatch");
+    ok &= expect(!cast->capabilities.metadata, "cast metadata capability mismatch");
+    ok &= expect(cast->capabilities.transport == "cast-v2", "cast transport mismatch");
 
     ok &= expect(!wfd->capabilities.network_listener, "miracast listener capability mismatch");
     ok &= expect(!wfd->capabilities.discovery, "miracast discovery capability mismatch");

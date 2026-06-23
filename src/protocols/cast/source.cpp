@@ -30,7 +30,7 @@ receiver_source_descriptor make_cast_receiver_source(const config& cfg) {
         .port = cfg.cast_port,
         .enabled = cfg.enable_cast,
         .experimental = true,
-        .detail = "cast v2 probe receiver",
+        .detail = "cast v2 control/status receiver",
         .capabilities =
             {
                 .network_listener = true,
@@ -39,7 +39,7 @@ receiver_source_descriptor make_cast_receiver_source(const config& cfg) {
                 .media_setup = false,
                 .audio = false,
                 .video = false,
-                .remote_control = false,
+                .remote_control = true,
                 .metadata = false,
                 .transport = "cast-v2",
             },

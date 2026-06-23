@@ -52,18 +52,81 @@ grep -q '"state":"disabled"' "${status_json}"
 
 exec 3<>"/dev/tcp/127.0.0.1/${port}"
 printf "GET /setup/eureka_info HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n" >&3
-response=$(timeout 2 cat <&3 || true)
+response=$(timeout 2 cat <&3 2>/dev/null || true)
 exec 3<&-
 exec 3>&-
 
-printf "%s" "${response}" | grep -q "HTTP/1.1 501 Not Implemented"
+printf "%s" "${response}" | grep -q "HTTP/1.1 200 OK"
 printf "%s" "${response}" | grep -q '"receiver":"cast-v2"'
-printf "%s" "${response}" | grep -q '"status":"not_implemented"'
+printf "%s" "${response}" | grep -q '"status":"control_ready"'
+
+python3 - "${port}" <<'PY'
+import socket
+import struct
+import sys
+
+
+def varint(value):
+    out = bytearray()
+    while value >= 0x80:
+        out.append((value & 0x7F) | 0x80)
+        value >>= 7
+    out.append(value)
+    return bytes(out)
+
+
+def key(field, wire):
+    return varint((field << 3) | wire)
+
+
+def string_field(field, value):
+    raw = value.encode()
+    return key(field, 2) + varint(len(raw)) + raw
+
+
+def varint_field(field, value):
+    return key(field, 0) + varint(value)
+
+
+def cast_message(namespace, payload):
+    body = bytearray()
+    body += varint_field(1, 0)
+    body += string_field(2, "sender-0")
+    body += string_field(3, "receiver-0")
+    body += string_field(4, namespace)
+    body += varint_field(5, 0)
+    body += string_field(6, payload)
+    return struct.pack(">I", len(body)) + body
+
+
+def recv_exact(sock, count):
+    data = bytearray()
+    while len(data) < count:
+        chunk = sock.recv(count - len(data))
+        if not chunk:
+            raise RuntimeError("connection closed")
+        data += chunk
+    return bytes(data)
+
+
+with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as sock:
+    sock.sendall(
+        cast_message(
+            "urn:x-cast:com.google.cast.receiver",
+            '{"type":"GET_STATUS","requestId":1}',
+        )
+    )
+    length = struct.unpack(">I", recv_exact(sock, 4))[0]
+    response = recv_exact(sock, length)
+    assert b"RECEIVER_STATUS" in response
+    assert b'"requestId":1' in response
+    assert b'"friendlyName":"Mirage"' in response
+PY
 
 kill -INT "${pid}"
 wait "${pid}"
 pid=
 
-grep -q "Cast stream setup: mode=probe_only" "${tmpdir}/err"
+grep -q "Cast stream setup: mode=control_status" "${tmpdir}/err"
 test -s "${tmpdir}/state/mirage/identity.key"
 grep -Eq '^[A-Za-z0-9+/]{43}=$' "${tmpdir}/state/mirage/identity.key"

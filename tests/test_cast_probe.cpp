@@ -35,21 +35,22 @@ int main() {
         "GET /setup/eureka_info HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n", "Living Room");
     ok &= expect(get.kind == mirage::protocols::cast::probe_kind::http_status,
                  "get probe kind mismatch");
-    ok &= expect(contains(get.response, "HTTP/1.1 501 Not Implemented"),
+    ok &= expect(contains(get.response, "HTTP/1.1 200 OK"),
                  "get response status mismatch");
     ok &= expect(contains(get.response, "\"name\":\"Living Room\""),
                  "get response name mismatch");
-    ok &= expect(contains(get.response, "\"status\":\"not_implemented\""),
+    ok &= expect(contains(get.response, "\"status\":\"control_ready\""),
                  "get response status body mismatch");
-    ok &= expect(contains(get.response, "cast media channel is not implemented yet"),
+    ok &= expect(contains(get.response, "media launch is not implemented yet"),
                  "get response detail mismatch");
 
     auto head = mirage::protocols::cast::handle_probe(
         "HEAD /setup/eureka_info HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n", "Living Room");
     ok &= expect(head.kind == mirage::protocols::cast::probe_kind::http_status,
                  "head probe kind mismatch");
+    ok &= expect(contains(head.response, "HTTP/1.1 200 OK"), "head response status mismatch");
     ok &= expect(contains(head.response, "Content-Length: 0"), "head content length mismatch");
-    ok &= expect(!contains(head.response, "\"status\":\"not_implemented\""),
+    ok &= expect(!contains(head.response, "\"status\":\"control_ready\""),
                  "head response unexpectedly included a body");
 
     std::string tls_client_hello;

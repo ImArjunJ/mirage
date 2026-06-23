@@ -12,6 +12,7 @@
 #include "core/log.hpp"
 #include "io/io.hpp"
 #include "protocols/cast/framing.hpp"
+#include "protocols/cast/message.hpp"
 #include "protocols/cast/probe.hpp"
 #include "protocols/protocols.hpp"
 namespace mirage::protocols {
@@ -44,22 +45,47 @@ std::span<const std::byte> byte_view(std::string_view data) {
     return std::as_bytes(std::span<const char>(data.data(), data.size()));
 }
 
-void log_ready_frames(cast::channel_frame_parser& parser) {
+io::task<void> handle_ready_frames(io::tcp_stream& socket, cast::channel_frame_parser& parser,
+                                   std::string_view device_name) {
     while (auto frame = parser.next_frame()) {
-        mirage::log::debug(
-            "cast channel: received {} byte frame, message handling is not implemented",
-            frame->size());
+        auto message = cast::parse_channel_message(*frame);
+        if (!message) {
+            mirage::log::debug("cast channel: failed to parse message: {}",
+                               message.error().message);
+            continue;
+        }
+        mirage::log::debug("cast channel: {} -> {} namespace={} payload={} bytes",
+                           message->source_id, message->destination_id, message->namespace_,
+                           message->payload_utf8.size() + message->payload_binary.size());
+        auto responses = cast::handle_channel_message(*message, device_name);
+        for (const auto& response : responses) {
+            auto payload = cast::serialize_channel_message(response);
+            if (!payload) {
+                mirage::log::debug("cast channel: failed to serialize response: {}",
+                                   payload.error().message);
+                continue;
+            }
+            auto framed = cast::make_channel_frame(*payload);
+            if (!framed) {
+                mirage::log::debug("cast channel: failed to frame response: {}",
+                                   framed.error().message);
+                continue;
+            }
+            co_await socket.async_write(std::span<const std::byte>(framed->data(),
+                                                                    framed->size()));
+        }
     }
 }
 
-io::task<void> handle_cast_channel(io::tcp_stream& socket, std::string_view first_packet) {
+io::task<void> handle_cast_channel(io::tcp_stream& socket, std::string_view first_packet,
+                                   std::string_view device_name) {
     cast::channel_frame_parser parser;
     auto appended = parser.append(byte_view(first_packet));
     if (!appended) {
         mirage::log::debug("cast channel: rejected frame prefix: {}", appended.error().message);
         co_return;
     }
-    log_ready_frames(parser);
+    co_await handle_ready_frames(socket, parser, device_name);
 
     std::array<std::byte, 2048> buffer{};
     while (socket.is_open()) {
@@ -72,7 +98,7 @@ io::task<void> handle_cast_channel(io::tcp_stream& socket, std::string_view firs
             mirage::log::debug("cast channel: rejected frame: {}", appended.error().message);
             co_return;
         }
-        log_ready_frames(parser);
+        co_await handle_ready_frames(socket, parser, device_name);
     }
 }
 
@@ -94,8 +120,8 @@ io::task<void> handle_cast_connection(io::tcp_stream socket, std::string device_
                 break;
             case cast::probe_kind::channel_frame:
                 mirage::log::debug(
-                    "cast channel: plaintext frame stream connected, message handling is not implemented");
-                co_await handle_cast_channel(socket, data);
+                    "cast channel: plaintext frame stream connected, control/status enabled");
+                co_await handle_cast_channel(socket, data, device_name);
                 break;
             case cast::probe_kind::unsupported:
                 mirage::log::debug("cast probe: unsupported first packet");

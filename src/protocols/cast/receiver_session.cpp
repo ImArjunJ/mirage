@@ -36,7 +36,7 @@ public:
         receiver_.emplace(std::move(*receiver));
         adapters.mark_listening(id());
         publish_discovery(adapters, publisher);
-        log::diagnostic("Cast stream setup: mode=probe_only, port={}", source_.port);
+        log::diagnostic("Cast stream setup: mode=control_status, port={}", source_.port);
         return {};
     }
 

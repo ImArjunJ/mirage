@@ -86,11 +86,12 @@ probe_response handle_probe(std::string_view data, std::string_view device_name)
         is_head) {
         auto body = std::format(
             "{{\"name\":\"{}\",\"receiver\":\"cast-v2\","
-            "\"status\":\"not_implemented\","
-            "\"detail\":\"cast media channel is not implemented yet\"}}\n",
+            "\"status\":\"control_ready\","
+            "\"detail\":\"cast control/status channel is available; media launch is not "
+            "implemented yet\"}}\n",
             json_escape(device_name));
         return {.kind = probe_kind::http_status,
-                .response = http_response(501, "Not Implemented", body, !is_head)};
+                .response = http_response(200, "OK", body, !is_head)};
     }
 
     if (looks_like_channel_frame(data)) {

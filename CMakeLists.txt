@@ -121,6 +121,7 @@ add_executable(mirage
     src/protocols/rtsp_message.cpp
     src/protocols/cast_channel.cpp
     src/protocols/cast/framing.cpp
+    src/protocols/cast/message.cpp
     src/protocols/cast/probe.cpp
     src/protocols/wfd_session.cpp
     src/protocols/receiver_sources.cpp
@@ -225,6 +226,15 @@ if(BUILD_TESTING)
     target_compile_options(mirage_cast_framing_test PRIVATE ${MIRAGE_CXX_FLAGS})
     target_link_options(mirage_cast_framing_test PRIVATE ${MIRAGE_LINK_FLAGS})
     add_test(NAME cast_framing COMMAND mirage_cast_framing_test)
+
+    add_executable(mirage_cast_message_test
+        tests/test_cast_message.cpp
+        src/protocols/cast/message.cpp
+    )
+    target_include_directories(mirage_cast_message_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_options(mirage_cast_message_test PRIVATE ${MIRAGE_CXX_FLAGS})
+    target_link_options(mirage_cast_message_test PRIVATE ${MIRAGE_LINK_FLAGS})
+    add_test(NAME cast_message COMMAND mirage_cast_message_test)
 
     add_executable(mirage_receiver_adapter_test
         tests/test_receiver_adapter.cpp
