@@ -118,6 +118,7 @@ add_executable(mirage
     src/audio/audio_decoder.cpp
     src/render/vulkan_renderer.cpp
     src/protocols/rtsp_server.cpp
+    src/protocols/rtsp_message.cpp
     src/protocols/cast_channel.cpp
     src/protocols/cast/framing.cpp
     src/protocols/cast/probe.cpp
@@ -205,6 +206,15 @@ if(BUILD_TESTING)
     target_compile_options(mirage_cast_probe_test PRIVATE ${MIRAGE_CXX_FLAGS})
     target_link_options(mirage_cast_probe_test PRIVATE ${MIRAGE_LINK_FLAGS})
     add_test(NAME cast_probe COMMAND mirage_cast_probe_test)
+
+    add_executable(mirage_rtsp_message_test
+        tests/test_rtsp_message.cpp
+        src/protocols/rtsp_message.cpp
+    )
+    target_include_directories(mirage_rtsp_message_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_options(mirage_rtsp_message_test PRIVATE ${MIRAGE_CXX_FLAGS})
+    target_link_options(mirage_rtsp_message_test PRIVATE ${MIRAGE_LINK_FLAGS})
+    add_test(NAME rtsp_message COMMAND mirage_rtsp_message_test)
 
     add_executable(mirage_cast_framing_test
         tests/test_cast_framing.cpp

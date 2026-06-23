@@ -23,6 +23,7 @@
 #include "protocols/airplay/media_source.hpp"
 #include "protocols/airplay_protocol.hpp"
 #include "protocols/protocols.hpp"
+#include "protocols/rtsp_message.hpp"
 namespace mirage::protocols {
 namespace bplist {
 struct plist_value;
@@ -625,65 +626,36 @@ io::task<result<rtsp_request>> rtsp_session::read_request() {
     rtsp_request req;
     try {
         auto header_str = co_await socket_.async_read_until("\r\n\r\n");
-        std::istringstream stream(header_str);
-        std::string line;
-        std::getline(stream, line);
-        if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
+        auto parsed_head = parse_rtsp_request_head(header_str);
+        if (!parsed_head) {
+            co_return std::unexpected(parsed_head.error());
         }
-        std::istringstream request_line(line);
-        request_line >> req.method >> req.uri >> req.version;
+
+        size_t content_length = parsed_head->content_length;
+        if (parsed_head->cseq) {
+            cseq_ = *parsed_head->cseq;
+        }
+        req.method = std::move(parsed_head->method);
+        req.uri = std::move(parsed_head->uri);
+        req.version = std::move(parsed_head->version);
+        req.headers = std::move(parsed_head->headers);
+
         mirage::log::debug("Request: {} {} {}", req.method, req.uri, req.version);
-        while (std::getline(stream, line)) {
-            if (!line.empty() && line.back() == '\r') {
-                line.pop_back();
+
+        if (content_length > 0) {
+            auto& leftover = socket_.buffer();
+            size_t from_buffer = std::min(leftover.size(), content_length);
+            if (from_buffer > 0) {
+                req.body.resize(from_buffer);
+                std::memcpy(req.body.data(), leftover.data(), from_buffer);
+                leftover.erase(0, from_buffer);
             }
-            if (line.empty()) {
-                break;
-            }
-            auto colon = line.find(':');
-            if (colon != std::string::npos) {
-                auto key = line.substr(0, colon);
-                auto value = line.substr(colon + 1);
-                auto start = value.find_first_not_of(" \t");
-                if (start != std::string::npos) {
-                    value = value.substr(start);
-                }
-                req.headers[key] = value;
-            }
-        }
-        std::string cseq_val;
-        std::string cl_val;
-        for (const auto& [k, v] : req.headers) {
-            std::string lk = k;
-            std::transform(lk.begin(), lk.end(), lk.begin(),
-                           [](unsigned char c) { return std::tolower(c); });
-            if (lk == "cseq") {
-                cseq_val = v;
-            } else if (lk == "content-length") {
-                cl_val = v;
-            }
-        }
-        if (!cseq_val.empty()) {
-            cseq_ = static_cast<uint32_t>(std::stoul(cseq_val));
-        }
-        if (!cl_val.empty()) {
-            size_t content_length = std::stoull(cl_val);
-            if (content_length > 0) {
-                auto& leftover = socket_.buffer();
-                size_t from_buffer = std::min(leftover.size(), content_length);
-                if (from_buffer > 0) {
-                    req.body.resize(from_buffer);
-                    std::memcpy(req.body.data(), leftover.data(), from_buffer);
-                    leftover.erase(0, from_buffer);
-                }
-                if (req.body.size() < content_length) {
-                    auto to_read = content_length - req.body.size();
-                    auto offset = req.body.size();
-                    req.body.resize(content_length);
-                    co_await socket_.async_read_exactly(
-                        std::span<std::byte>(req.body.data() + offset, to_read));
-                }
+            if (req.body.size() < content_length) {
+                auto to_read = content_length - req.body.size();
+                auto offset = req.body.size();
+                req.body.resize(content_length);
+                co_await socket_.async_read_exactly(
+                    std::span<std::byte>(req.body.data() + offset, to_read));
             }
         }
     } catch (const std::exception& e) {
