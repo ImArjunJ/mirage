@@ -1,9 +1,14 @@
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
+#include <filesystem>
+#include <format>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 
 #include "core/receiver_identity.hpp"
@@ -31,6 +36,21 @@ bool is_upper_hex(std::string_view value) {
     return std::ranges::all_of(value, [](char c) {
         return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F');
     });
+}
+
+std::filesystem::path temp_dir(std::string_view name) {
+    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    return std::filesystem::temp_directory_path() /
+           std::format("mirage-receiver-identity-{}-{}", name, stamp);
+}
+
+bool write_file(const std::filesystem::path& path, std::string_view content) {
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file) {
+        return false;
+    }
+    file << content;
+    return true;
 }
 
 }  // namespace
@@ -100,6 +120,64 @@ int main() {
         "Living Room", 7000, public_key, "AA:BB:CC:DD:EE:FF");
     ok &= expect(txt_value(airplay_service_a, "pi") != txt_value(airplay_service_c, "pi"),
                  "airplay pi did not change for a different identity");
+
+    const auto dir = temp_dir("store");
+    const auto key_path = dir / "identity.key";
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    ok &= expect(!ec, "could not create identity test directory");
+
+    auto created = mirage::load_or_create_receiver_identity_keypair(key_path);
+    ok &= expect(created.has_value(), "identity key was not created");
+    std::array<std::byte, 32> created_public_key{};
+    if (created) {
+        created_public_key = created->keypair.public_key();
+        ok &= expect(created->source == mirage::receiver_identity_key_source::created,
+                     "new identity source was not created");
+        ok &= expect(created->warnings.empty(), "new identity had warnings");
+        ok &= expect(std::filesystem::exists(key_path), "identity key file was not written");
+    }
+
+    auto loaded = mirage::load_or_create_receiver_identity_keypair(key_path);
+    ok &= expect(loaded.has_value(), "identity key was not loaded");
+    if (loaded) {
+        ok &= expect(loaded->source == mirage::receiver_identity_key_source::loaded,
+                     "existing identity source was not loaded");
+        ok &= expect(loaded->warnings.empty(), "loaded identity had warnings");
+        ok &= expect(loaded->keypair.public_key() == created_public_key,
+                     "loaded identity public key changed");
+    }
+
+    const auto invalid_path = dir / "invalid.key";
+    ok &= expect(write_file(invalid_path, "not-base64\n"), "could not write invalid key");
+    auto repaired = mirage::load_or_create_receiver_identity_keypair(invalid_path);
+    ok &= expect(repaired.has_value(), "invalid identity key was not repaired");
+    if (repaired) {
+        ok &= expect(repaired->source == mirage::receiver_identity_key_source::created,
+                     "invalid identity source was not recreated");
+        ok &= expect(!repaired->warnings.empty(), "invalid identity had no warning");
+        auto reloaded = mirage::load_or_create_receiver_identity_keypair(invalid_path);
+        ok &= expect(reloaded.has_value(), "repaired identity was not loadable");
+        if (reloaded) {
+            ok &= expect(reloaded->source == mirage::receiver_identity_key_source::loaded,
+                         "repaired identity source was not loaded");
+            ok &= expect(reloaded->keypair.public_key() == repaired->keypair.public_key(),
+                         "repaired identity public key changed");
+        }
+    }
+
+    const auto directory_key_path = dir / "directory-key";
+    std::filesystem::create_directories(directory_key_path, ec);
+    ok &= expect(!ec, "could not create directory key path");
+    auto transient = mirage::load_or_create_receiver_identity_keypair(directory_key_path);
+    ok &= expect(transient.has_value(), "transient identity was not generated");
+    if (transient) {
+        ok &= expect(transient->source == mirage::receiver_identity_key_source::transient,
+                     "directory key path did not force transient identity");
+        ok &= expect(!transient->warnings.empty(), "transient identity had no warning");
+    }
+
+    std::filesystem::remove_all(dir, ec);
 
     return ok ? 0 : 1;
 }

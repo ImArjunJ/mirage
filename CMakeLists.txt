@@ -349,6 +349,7 @@ if(BUILD_TESTING)
 
     add_executable(mirage_receiver_sources_test
         tests/test_receiver_sources.cpp
+        src/core/error.cpp
         src/protocols/receiver_sources.cpp
         src/core/receiver_source.cpp
         src/core/receiver_identity.cpp
@@ -373,7 +374,10 @@ if(BUILD_TESTING)
         src/core/error.cpp
         src/discovery/service_records.cpp
         src/crypto/aes_ctr.cpp
+        src/crypto/fairplay_pairing.cpp
         src/crypto/fairplay_sap.cpp
+        src/crypto/srp6a.cpp
+        src/crypto/tlv8_chacha.cpp
     )
     target_include_directories(mirage_receiver_identity_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_compile_options(mirage_receiver_identity_test PRIVATE ${MIRAGE_CXX_FLAGS})

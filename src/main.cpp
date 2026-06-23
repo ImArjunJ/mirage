@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <array>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
@@ -132,100 +131,30 @@ std::filesystem::path identity_key_path(const mirage::config& cfg) {
     return mirage::runtime_identity_key_path(cfg, mirage::current_runtime_path_environment());
 }
 
+void log_receiver_identity_key_result(
+    const std::filesystem::path& path, const mirage::receiver_identity_keypair& identity) {
+    for (const auto& warning : identity.warnings) {
+        mirage::log::warn("{}", warning);
+    }
+    switch (identity.source) {
+        case mirage::receiver_identity_key_source::loaded:
+            mirage::log::info("loaded persistent receiver identity: {}", path.string());
+            break;
+        case mirage::receiver_identity_key_source::created:
+            mirage::log::info("created persistent receiver identity: {}", path.string());
+            break;
+        case mirage::receiver_identity_key_source::transient:
+            mirage::log::warn("using transient receiver identity for this run");
+            break;
+    }
+}
+
 std::string inspect_port_command(uint16_t port) {
 #ifdef _WIN32
     return std::format("netstat -ano | findstr :{}", port);
 #else
     return std::format("lsof -i :{}", port);
 #endif
-}
-
-std::string trim_ascii(std::string value) {
-    while (!value.empty() && (value.back() == ' ' || value.back() == '\t' || value.back() == '\r' ||
-                              value.back() == '\n')) {
-        value.pop_back();
-    }
-    size_t start = 0;
-    while (start < value.size() && (value[start] == ' ' || value[start] == '\t' ||
-                                    value[start] == '\r' || value[start] == '\n')) {
-        ++start;
-    }
-    if (start > 0) {
-        value.erase(0, start);
-    }
-    return value;
-}
-
-bool write_identity_key(const std::filesystem::path& path,
-                        const std::array<std::byte, 32>& private_key) {
-    std::error_code ec;
-    if (!path.parent_path().empty()) {
-        std::filesystem::create_directories(path.parent_path(), ec);
-        if (ec) {
-            mirage::log::warn("could not create identity key directory {}: {}",
-                              path.parent_path().string(), ec.message());
-            return false;
-        }
-    }
-
-    auto encoded = mirage::base64_encode(private_key);
-    std::ofstream file(path, std::ios::binary | std::ios::trunc);
-    if (!file) {
-        mirage::log::warn("could not write identity key: {}", path.string());
-        return false;
-    }
-    file << encoded << "\n";
-    file.close();
-    std::filesystem::permissions(
-        path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
-        std::filesystem::perm_options::replace, ec);
-    return true;
-}
-
-mirage::result<mirage::crypto::ed25519_keypair> load_or_create_identity_keypair(
-    const mirage::config& cfg) {
-    auto path = identity_key_path(cfg);
-    if (std::filesystem::exists(path)) {
-        std::ifstream file(path, std::ios::binary);
-        if (file) {
-            std::string encoded((std::istreambuf_iterator<char>(file)),
-                                std::istreambuf_iterator<char>());
-            auto decoded = mirage::base64_decode(trim_ascii(std::move(encoded)));
-            if (decoded && decoded->size() == 32) {
-                std::array<std::byte, 32> private_key{};
-                std::copy_n(decoded->begin(), private_key.size(), private_key.begin());
-                auto keypair = mirage::crypto::ed25519_keypair::from_private_key(private_key);
-                if (keypair) {
-                    mirage::log::info("loaded persistent receiver identity: {}", path.string());
-                    return keypair;
-                }
-                mirage::log::warn("identity key could not be loaded: {}", keypair.error().message);
-            } else if (decoded) {
-                mirage::log::warn("identity key has {} bytes, expected 32: {}", decoded->size(),
-                                  path.string());
-            } else {
-                mirage::log::warn("identity key is not valid base64: {}", decoded.error().message);
-            }
-        } else {
-            mirage::log::warn("could not open identity key: {}", path.string());
-        }
-    }
-
-    auto keypair = mirage::crypto::ed25519_keypair::generate();
-    if (!keypair) {
-        return std::unexpected(keypair.error());
-    }
-    auto private_key = keypair->private_key();
-    if (private_key) {
-        if (write_identity_key(path, *private_key)) {
-            mirage::log::info("created persistent receiver identity: {}", path.string());
-        } else {
-            mirage::log::warn("using transient receiver identity for this run");
-        }
-    } else {
-        mirage::log::warn("could not persist receiver identity: {}", private_key.error().message);
-    }
-    return keypair;
 }
 
 int handle_paths(int argc, char* argv[]) {
@@ -639,17 +568,19 @@ int main(int argc, char* argv[]) {
     try {
         mirage::io::io_context ctx;
         auto receiver_identity_path = identity_key_path(cfg);
-        auto keypair = load_or_create_identity_keypair(cfg);
-        if (!keypair) {
+        auto receiver_identity =
+            mirage::load_or_create_receiver_identity_keypair(receiver_identity_path);
+        if (!receiver_identity) {
             std::println(stderr, "crypto error: could not load or generate receiver identity.");
-            std::println(stderr, "  {}", keypair.error().message);
+            std::println(stderr, "  {}", receiver_identity.error().message);
             std::println(stderr, "  this is unusual -- check that openssl is installed correctly.");
             if (owns_runtime_files) {
                 clear_runtime_files();
             }
             return 1;
         }
-        auto receiver_public_key = keypair->public_key();
+        log_receiver_identity_key_result(receiver_identity_path, *receiver_identity);
+        auto receiver_public_key = receiver_identity->keypair.public_key();
         auto interfaces = mirage::discovery::enumerate_interfaces();
         if (!interfaces) {
             std::println(stderr, "no network interfaces found.");
@@ -699,7 +630,7 @@ int main(int argc, char* argv[]) {
             receiver_identity_path, started_at, adapters, receiver_sources.all());
         const mirage::receiver_source_runtime receiver_runtime{
             .io_context = &ctx,
-            .receiver_identity = &*keypair,
+            .receiver_identity = &receiver_identity->keypair,
             .receiver_public_key = &receiver_public_key,
             .session_observer = &status_tracker,
             .device_name = cfg.device_name,
