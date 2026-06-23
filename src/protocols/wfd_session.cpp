@@ -136,6 +136,7 @@ io::task<void> wfd_session::run() {
                     .address = socket.remote_endpoint().addr.to_string(),
                     .state = "connected",
                     .connected_at = 0,
+                    .streams = {},
                 });
             }
             mirage::log::info("wfd connection from {}", socket.remote_endpoint().addr.to_string());

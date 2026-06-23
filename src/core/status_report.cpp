@@ -103,6 +103,33 @@ std::string render_status_json(const receiver_status_report& report) {
         out << ",\"address\":\"" << json_escape(client.address) << "\"";
         out << ",\"state\":\"" << json_escape(client.state) << "\"";
         out << ",\"connected_at\":" << client.connected_at;
+        out << ",\"streams\":[";
+        for (size_t stream_index = 0; stream_index < client.streams.size(); ++stream_index) {
+            const auto& stream = client.streams[stream_index];
+            if (stream_index > 0) {
+                out << ",";
+            }
+            out << "{";
+            out << "\"kind\":\"" << json_escape(stream.kind) << "\"";
+            out << ",\"health\":\"" << json_escape(stream.health) << "\"";
+            out << ",\"reason\":\"" << json_escape(stream.reason) << "\"";
+            out << ",\"received_packets\":" << stream.received_packets;
+            out << ",\"decoded_packets\":" << stream.decoded_packets;
+            out << ",\"silent_or_marker\":" << stream.silent_or_marker;
+            out << ",\"gaps\":" << stream.gaps;
+            out << ",\"resend_requests\":" << stream.resend_requests;
+            out << ",\"stale_or_redundant\":" << stream.stale_or_redundant;
+            out << ",\"duplicates\":" << stream.duplicates;
+            out << ",\"invalid\":" << stream.invalid;
+            out << ",\"pending\":" << stream.pending;
+            out << ",\"frames\":" << stream.frames;
+            out << ",\"keyframes\":" << stream.keyframes;
+            out << ",\"decrypted_frames\":" << stream.decrypted_frames;
+            out << ",\"decrypt_failures\":" << stream.decrypt_failures;
+            out << ",\"decode_failures\":" << stream.decode_failures;
+            out << "}";
+        }
+        out << "]";
         out << "}";
     }
     out << "]";

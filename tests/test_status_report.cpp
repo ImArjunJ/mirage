@@ -88,6 +88,26 @@ int main() {
             .address = "192.0.2.20",
             .state = "connected",
             .connected_at = 123460,
+            .streams =
+                {
+                    mirage::receiver_client_stream_status{
+                        .kind = "audio",
+                        .health = "clean",
+                        .reason = "ok",
+                        .received_packets = 120,
+                        .decoded_packets = 118,
+                        .silent_or_marker = 2,
+                    },
+                    mirage::receiver_client_stream_status{
+                        .kind = "video",
+                        .health = "attention",
+                        .reason = "decode_failures",
+                        .frames = 90,
+                        .keyframes = 1,
+                        .decrypted_frames = 89,
+                        .decode_failures = 1,
+                    },
+                },
         },
     };
 
@@ -135,6 +155,15 @@ int main() {
     ok &= expect(contains(json, "\"name\":\"Junie\""), "client name missing");
     ok &= expect(contains(json, "\"address\":\"192.0.2.20\""), "client address missing");
     ok &= expect(contains(json, "\"connected_at\":123460"), "client connected time missing");
+    ok &= expect(contains(json, "\"streams\":[{"), "client streams missing");
+    ok &= expect(contains(json, "\"kind\":\"audio\""), "audio stream missing");
+    ok &= expect(contains(json, "\"health\":\"clean\""), "audio health missing");
+    ok &= expect(contains(json, "\"received_packets\":120"), "audio received count missing");
+    ok &= expect(contains(json, "\"decoded_packets\":118"), "audio decoded count missing");
+    ok &= expect(contains(json, "\"kind\":\"video\""), "video stream missing");
+    ok &= expect(contains(json, "\"reason\":\"decode_failures\""), "video reason missing");
+    ok &= expect(contains(json, "\"frames\":90"), "video frame count missing");
+    ok &= expect(contains(json, "\"decode_failures\":1"), "video failure count missing");
 
     return ok ? 0 : 1;
 }

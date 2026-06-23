@@ -34,7 +34,9 @@ class rtsp_session : public std::enable_shared_from_this<rtsp_session> {
 public:
     static std::shared_ptr<rtsp_session> create(io::tcp_stream socket,
                                                 crypto::fairplay_pairing pairing,
-                                                receiver_source_descriptor source);
+                                                receiver_source_descriptor source,
+                                                receiver_session_observer* observer = nullptr,
+                                                uint64_t client_status_id = 0);
     io::task<result<void>> run();
     void stop();
     [[nodiscard]] rtsp_session_state state() const { return state_; }
@@ -68,7 +70,8 @@ private:
     void close_video_stream();
     void close_stream_sockets();
     rtsp_session(io::tcp_stream socket, crypto::fairplay_pairing pairing,
-                 receiver_source_descriptor source);
+                 receiver_source_descriptor source, receiver_session_observer* observer,
+                 uint64_t client_status_id);
     io::tcp_stream socket_;
     crypto::fairplay_pairing pairing_;
     rtsp_session_state state_ = rtsp_session_state::init;
@@ -82,6 +85,8 @@ private:
     std::unique_ptr<io::udp_socket> audio_control_socket_;
     std::unique_ptr<media::media_sink> media_sink_;
     receiver_source_descriptor source_;
+    receiver_session_observer* observer_ = nullptr;
+    uint64_t client_status_id_ = 0;
     airplay::media_source airplay_media_;
     io::endpoint client_timing_endpoint_;
     bool base_receivers_started_ = false;

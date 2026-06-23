@@ -551,6 +551,43 @@ int handle_status(bool verbose) {
         return {};
     };
 
+    auto extract_array_from = [](std::string_view object,
+                                 const std::string& key) -> std::string_view {
+        auto needle = "\"" + key + "\":[";
+        auto pos = object.find(needle);
+        if (pos == std::string_view::npos) {
+            return {};
+        }
+        auto array_start = pos + needle.size() - 1;
+        size_t depth = 0;
+        bool in_string = false;
+        bool escaped = false;
+        for (size_t scan = array_start; scan < object.size(); ++scan) {
+            char c = object[scan];
+            if (in_string) {
+                if (escaped) {
+                    escaped = false;
+                } else if (c == '\\') {
+                    escaped = true;
+                } else if (c == '"') {
+                    in_string = false;
+                }
+                continue;
+            }
+            if (c == '"') {
+                in_string = true;
+            } else if (c == '[') {
+                ++depth;
+            } else if (c == ']') {
+                --depth;
+                if (depth == 0) {
+                    return object.substr(array_start, scan - array_start + 1);
+                }
+            }
+        }
+        return {};
+    };
+
     auto extract_objects = [](std::string_view array) -> std::vector<std::string_view> {
         std::vector<std::string_view> objects;
         size_t object_start = std::string_view::npos;
@@ -702,6 +739,40 @@ int handle_status(bool verbose) {
                 line += std::format(", {}", client_name);
             }
             std::println(stderr, "{}", line);
+
+            for (auto stream : extract_objects(extract_array_from(object, "streams"))) {
+                auto kind = extract_string_from(stream, "kind");
+                auto health = extract_string_from(stream, "health");
+                auto reason = extract_string_from(stream, "reason");
+                std::string stream_line =
+                    std::format("      {}: {}", kind.empty() ? "stream" : kind,
+                                health.empty() ? "unknown" : health);
+
+                if (kind == "audio") {
+                    auto decoded = extract_int_from(stream, "decoded_packets");
+                    auto received = extract_int_from(stream, "received_packets");
+                    if (decoded) {
+                        stream_line += std::format(", decoded {}", *decoded);
+                    }
+                    if (received) {
+                        stream_line += std::format(", received {}", *received);
+                    }
+                } else if (kind == "video") {
+                    auto frames = extract_int_from(stream, "frames");
+                    auto keyframes = extract_int_from(stream, "keyframes");
+                    if (frames) {
+                        stream_line += std::format(", frames {}", *frames);
+                    }
+                    if (keyframes) {
+                        stream_line += std::format(", keyframes {}", *keyframes);
+                    }
+                }
+
+                if (!reason.empty() && reason != "ok") {
+                    stream_line += std::format(", reason {}", reason);
+                }
+                std::println(stderr, "{}", stream_line);
+            }
         }
         auto started = extract_int("started");
         if (started) {
@@ -851,6 +922,23 @@ public:
                 adapter != nullptr && adapter->state == mirage::receiver_adapter_state::running) {
                 adapters_.mark_listening(protocol_id);
             }
+        }
+        write();
+    }
+
+    void client_stream_updated(uint64_t client_id,
+                               mirage::receiver_client_stream_status stream) override {
+        auto client = std::ranges::find(clients_, client_id, &mirage::receiver_client_status::id);
+        if (client == clients_.end()) {
+            return;
+        }
+
+        auto existing = std::ranges::find(client->streams, stream.kind,
+                                          &mirage::receiver_client_stream_status::kind);
+        if (existing == client->streams.end()) {
+            client->streams.push_back(std::move(stream));
+        } else {
+            *existing = std::move(stream);
         }
         write();
     }

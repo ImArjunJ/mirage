@@ -531,17 +531,78 @@ static std::vector<int> parse_sdp_ints(std::string_view text) {
     }
     return values;
 }
+
+static receiver_client_stream_status make_audio_client_stream(
+    const receiver_audio_stream_summary& summary) {
+    return {
+        .kind = "audio",
+        .health = std::string(to_string(classify_audio_stream(summary))),
+        .reason = std::string(audio_stream_health_reason(summary)),
+        .received_packets = summary.received_packets,
+        .decoded_packets = summary.decoded_packets,
+        .silent_or_marker = summary.silent_or_marker,
+        .gaps = summary.gaps,
+        .resend_requests = summary.resend_requests,
+        .stale_or_redundant = summary.stale_or_redundant,
+        .duplicates = summary.duplicates,
+        .invalid = summary.invalid,
+        .pending = static_cast<uint64_t>(summary.pending),
+    };
+}
+
+static receiver_audio_stream_summary make_audio_summary(const airplay::audio_source_stats& stats) {
+    return {
+        .received_packets = stats.received_packets,
+        .decoded_packets = stats.decoded_packets,
+        .silent_or_marker = stats.silent_or_marker,
+        .gaps = stats.gaps,
+        .resend_requests = stats.resend_requests,
+        .stale_or_redundant = stats.stale_or_redundant,
+        .duplicates = stats.duplicates,
+        .invalid = stats.invalid,
+        .pending = stats.pending,
+    };
+}
+
+static receiver_client_stream_status make_video_client_stream(
+    const receiver_video_stream_summary& summary) {
+    return {
+        .kind = "video",
+        .health = std::string(to_string(classify_video_stream(summary))),
+        .reason = std::string(video_stream_health_reason(summary)),
+        .frames = summary.frames,
+        .keyframes = summary.keyframes,
+        .decrypted_frames = summary.decrypted_frames,
+        .decrypt_failures = summary.decrypt_failures,
+        .decode_failures = summary.decode_failures,
+    };
+}
+
+static receiver_video_stream_summary make_video_summary(const airplay::video_source_stats& stats) {
+    return {
+        .frames = stats.frames,
+        .keyframes = stats.keyframes,
+        .decrypted_frames = stats.decrypted_frames,
+        .decrypt_failures = stats.decrypt_failures,
+        .decode_failures = stats.decode_failures,
+    };
+}
+
 rtsp_session::rtsp_session(io::tcp_stream socket, crypto::fairplay_pairing pairing,
-                           receiver_source_descriptor source)
+                           receiver_source_descriptor source,
+                           receiver_session_observer* observer, uint64_t client_status_id)
     : socket_(std::move(socket)),
       pairing_(std::move(pairing)),
       media_sink_(media::make_local_media_sink()),
       source_(source),
+      observer_(observer),
+      client_status_id_(client_status_id),
       airplay_media_(*media_sink_) {}
 auto rtsp_session::create(io::tcp_stream socket, crypto::fairplay_pairing pairing,
-                          receiver_source_descriptor source) -> std::shared_ptr<rtsp_session> {
-    return std::shared_ptr<rtsp_session>(
-        new rtsp_session(std::move(socket), std::move(pairing), source));
+                          receiver_source_descriptor source, receiver_session_observer* observer,
+                          uint64_t client_status_id) -> std::shared_ptr<rtsp_session> {
+    return std::shared_ptr<rtsp_session>(new rtsp_session(
+        std::move(socket), std::move(pairing), source, observer, client_status_id));
 }
 void rtsp_session::reset_audio_packet_state() {
     audio_resend_control_seqnum_ = 0;
@@ -1599,6 +1660,7 @@ io::task<void> rtsp_session::run_mirror_receiver() {
             if (!video_setup) {
                 mirage::log::warn("Video setup failed: {}", video_setup.error().message);
             }
+            uint64_t next_status_update_frame = 120;
             std::array<std::byte, 128> header;
             while (mirror_socket.is_open() && state_ != rtsp_session_state::teardown &&
                    airplay_media_.video_open()) {
@@ -1643,15 +1705,23 @@ io::task<void> rtsp_session::run_mirror_receiver() {
                     mirage::log::debug("Mirror frame processing failed: {}",
                                        handled.error().message);
                 }
+                if (observer_ != nullptr && client_status_id_ != 0) {
+                    auto stats = airplay_media_.video_stats();
+                    if (stats.frames >= next_status_update_frame) {
+                        auto summary = make_video_summary(stats);
+                        observer_->client_stream_updated(client_status_id_,
+                                                         make_video_client_stream(summary));
+                        next_status_update_frame = stats.frames + 120;
+                    }
+                }
             }
             auto stats = airplay_media_.video_stats();
-            log_receiver_video_summary(source_, {
-                                                    .frames = stats.frames,
-                                                    .keyframes = stats.keyframes,
-                                                    .decrypted_frames = stats.decrypted_frames,
-                                                    .decrypt_failures = stats.decrypt_failures,
-                                                    .decode_failures = stats.decode_failures,
-                                                });
+            auto summary = make_video_summary(stats);
+            log_receiver_video_summary(source_, summary);
+            if (observer_ != nullptr && client_status_id_ != 0) {
+                observer_->client_stream_updated(client_status_id_,
+                                                 make_video_client_stream(summary));
+            }
             if (!airplay_media_.video_open()) {
                 mirage::log::info("Window closed, tearing down session");
                 state_ = rtsp_session_state::teardown;
@@ -1705,6 +1775,7 @@ io::task<void> rtsp_session::run_audio_receiver() {
                       audio_data_socket_->local_endpoint().port);
 
     std::array<std::byte, 2048> buf;
+    uint64_t next_status_update_packet = 500;
 
     try {
         while (audio_data_socket_->is_open() && state_ != rtsp_session_state::teardown) {
@@ -1722,6 +1793,15 @@ io::task<void> rtsp_session::run_audio_receiver() {
                 co_await send_audio_resend_request(received.resend->start_seqnum,
                                                    received.resend->count);
             }
+            if (observer_ != nullptr && client_status_id_ != 0) {
+                auto stats = airplay_media_.audio_stats();
+                if (stats.received_packets >= next_status_update_packet) {
+                    auto summary = make_audio_summary(stats);
+                    observer_->client_stream_updated(client_status_id_,
+                                                     make_audio_client_stream(summary));
+                    next_status_update_packet = stats.received_packets + 500;
+                }
+            }
         }
     } catch (const std::system_error& e) {
         if (audio_receiver_started_ && state_ != rtsp_session_state::teardown &&
@@ -1732,17 +1812,11 @@ io::task<void> rtsp_session::run_audio_receiver() {
 
     media_sink_->on_audio_teardown();
     auto stats = airplay_media_.audio_stats();
-    log_receiver_audio_summary(source_, {
-                                            .received_packets = stats.received_packets,
-                                            .decoded_packets = stats.decoded_packets,
-                                            .silent_or_marker = stats.silent_or_marker,
-                                            .gaps = stats.gaps,
-                                            .resend_requests = stats.resend_requests,
-                                            .stale_or_redundant = stats.stale_or_redundant,
-                                            .duplicates = stats.duplicates,
-                                            .invalid = stats.invalid,
-                                            .pending = stats.pending,
-                                        });
+    auto summary = make_audio_summary(stats);
+    log_receiver_audio_summary(source_, summary);
+    if (observer_ != nullptr && client_status_id_ != 0) {
+        observer_->client_stream_updated(client_status_id_, make_audio_client_stream(summary));
+    }
     audio_receiver_started_ = false;
 }
 io::task<void> rtsp_session::run_audio_control_receiver() {
@@ -2207,9 +2281,11 @@ io::task<void> rtsp_server::run() {
                     .address = socket.remote_endpoint().addr.to_string(),
                     .state = "connected",
                     .connected_at = 0,
+                    .streams = {},
                 });
             }
-            auto session = rtsp_session::create(std::move(socket), std::move(pairing), source_);
+            auto session = rtsp_session::create(std::move(socket), std::move(pairing), source_,
+                                                sessions_->observer, client_status_id);
             auto sessions = sessions_;
             auto session_id = sessions->add(session);
             io::co_spawn(acceptor_.context(), [session, sessions, session_id,
