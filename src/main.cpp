@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
@@ -178,6 +179,18 @@ std::string trim_ascii(std::string value) {
         value.erase(0, start);
     }
     return value;
+}
+
+mirage::result<uint16_t> parse_port_argument(std::string_view option, std::string_view value) {
+    uint32_t parsed = 0;
+    const auto* begin = value.data();
+    const auto* end = value.data() + value.size();
+    auto [ptr, ec] = std::from_chars(begin, end, parsed);
+    if (ec != std::errc{} || ptr != end || parsed > 65535) {
+        return std::unexpected(mirage::mirage_error::config_err(
+            std::format("{} expects a port from 0 to 65535, got '{}'", option, value)));
+    }
+    return static_cast<uint16_t>(parsed);
 }
 
 bool write_identity_key(const std::filesystem::path& path,
@@ -1093,7 +1106,6 @@ int main(int argc, char* argv[]) {
 
     mirage::config cfg;
     std::string config_file;
-    bool explicit_config_file = false;
     bool debug = false;
     bool trace = false;
     bool diagnostics = false;
@@ -1112,8 +1124,8 @@ int main(int argc, char* argv[]) {
         }
         if (arg == "--config" && i + 1 < argc) {
             config_file = argv[++i];
-            explicit_config_file = true;
-        } else if ((arg == "--name" || arg == "--port" || arg == "--identity-key") &&
+        } else if ((arg == "--name" || arg == "--port" || arg == "--cast-port" ||
+                    arg == "--miracast-port" || arg == "--identity-key") &&
                    i + 1 < argc) {
             ++i;
         }
@@ -1128,8 +1140,9 @@ int main(int argc, char* argv[]) {
         auto loaded = mirage::config::load_from_file(config_file);
         if (loaded) {
             cfg = *loaded;
-        } else if (explicit_config_file) {
-            mirage::log::warn("failed to load config: {}", loaded.error().message);
+        } else {
+            std::println(stderr, "failed to load config: {}", loaded.error().message);
+            return 1;
         }
     }
     for (int i = 1; i < argc; ++i) {
@@ -1138,12 +1151,39 @@ int main(int argc, char* argv[]) {
             ++i;
         } else if (arg == "--name" && i + 1 < argc) {
             cfg.device_name = argv[++i];
-        } else if (arg == "--port" && i + 1 < argc) {
-            cfg.airplay_port = static_cast<uint16_t>(std::stoi(argv[++i]));
-        } else if (arg == "--cast-port" && i + 1 < argc) {
-            cfg.cast_port = static_cast<uint16_t>(std::stoi(argv[++i]));
-        } else if (arg == "--miracast-port" && i + 1 < argc) {
-            cfg.miracast_port = static_cast<uint16_t>(std::stoi(argv[++i]));
+        } else if (arg == "--port") {
+            if (i + 1 >= argc) {
+                std::println(stderr, "missing value for --port");
+                return 2;
+            }
+            auto parsed = parse_port_argument(arg, argv[++i]);
+            if (!parsed) {
+                std::println(stderr, "{}", parsed.error().message);
+                return 2;
+            }
+            cfg.airplay_port = *parsed;
+        } else if (arg == "--cast-port") {
+            if (i + 1 >= argc) {
+                std::println(stderr, "missing value for --cast-port");
+                return 2;
+            }
+            auto parsed = parse_port_argument(arg, argv[++i]);
+            if (!parsed) {
+                std::println(stderr, "{}", parsed.error().message);
+                return 2;
+            }
+            cfg.cast_port = *parsed;
+        } else if (arg == "--miracast-port") {
+            if (i + 1 >= argc) {
+                std::println(stderr, "missing value for --miracast-port");
+                return 2;
+            }
+            auto parsed = parse_port_argument(arg, argv[++i]);
+            if (!parsed) {
+                std::println(stderr, "{}", parsed.error().message);
+                return 2;
+            }
+            cfg.miracast_port = *parsed;
         } else if (arg == "--identity-key" && i + 1 < argc) {
             cfg.identity_key_path = argv[++i];
         } else if (arg == "--no-airplay") {
@@ -1290,21 +1330,47 @@ int main(int argc, char* argv[]) {
             }
             auto session = source.create_session(receiver_runtime);
             if (!session) {
+                adapters.mark_error(source.id, session.error().message);
                 print_receiver_start_error(source.id, source.port, session.error());
                 continue;
             }
             start_receiver_session(std::move(*session));
         }
+        status_tracker.write();
+        if (receiver_sessions.empty()) {
+            if (receiver_sources.enabled().empty()) {
+                std::println(stderr, "no receiver protocols are enabled.");
+                std::println(stderr,
+                             "  enable airplay, cast, or miracast with config or command-line "
+                             "options.");
+            } else {
+                std::println(stderr, "no receiver protocols started.");
+                std::println(stderr, "  check the startup errors above.");
+            }
+            if (mdns) {
+                mdns->stop();
+            }
+            drain_shutdown_work(ctx);
+            ctx.stop();
+            if (owns_runtime_files) {
+                remove_pid_file();
+            }
+            return 1;
+        }
         if (mdns) {
             mirage::io::co_spawn(ctx, mdns->run());
         }
-
-        status_tracker.write();
 
         mirage::log::user("mirage started{}",
                           local_ip.empty() ? "" : std::format(" on {}", local_ip));
         for (const auto& source : receiver_sources.all()) {
             if (!source.enabled) {
+                continue;
+            }
+            const auto* adapter = adapters.find(source.id);
+            if (adapter != nullptr && adapter->state == mirage::receiver_adapter_state::error) {
+                mirage::log::user("  {} failed: {}", mirage::protocol_id(source.id),
+                                  adapter->detail);
                 continue;
             }
             if (source.port != 0) {

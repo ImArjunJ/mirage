@@ -283,6 +283,15 @@ if(BUILD_TESTING)
     target_link_options(mirage_status_report_test PRIVATE ${MIRAGE_LINK_FLAGS})
     add_test(NAME status_report COMMAND mirage_status_report_test)
 
+    add_executable(mirage_config_test
+        tests/test_config.cpp
+        src/core/config.cpp
+    )
+    target_include_directories(mirage_config_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_options(mirage_config_test PRIVATE ${MIRAGE_CXX_FLAGS})
+    target_link_options(mirage_config_test PRIVATE ${MIRAGE_LINK_FLAGS})
+    add_test(NAME config COMMAND mirage_config_test)
+
     add_executable(mirage_receiver_sources_test
         tests/test_receiver_sources.cpp
         src/protocols/receiver_sources.cpp

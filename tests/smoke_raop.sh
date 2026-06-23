@@ -22,6 +22,25 @@ iterations=${MIRAGE_SMOKE_ITERATIONS:-1}
 tmpdir=$(mktemp -d)
 pid=
 
+dump_failure() {
+    local code=$?
+    echo "raop smoke failed; logs from ${tmpdir}" >&2
+    if [[ -f "${tmpdir}/out" ]]; then
+        echo "--- stdout ---" >&2
+        cat "${tmpdir}/out" >&2
+    fi
+    if [[ -f "${tmpdir}/err" ]]; then
+        echo "--- stderr ---" >&2
+        cat "${tmpdir}/err" >&2
+    fi
+    if [[ -f "${tmpdir}/state/mirage/status.json" ]]; then
+        echo "--- status.json ---" >&2
+        cat "${tmpdir}/state/mirage/status.json" >&2
+        echo >&2
+    fi
+    return "${code}"
+}
+
 cleanup() {
     if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
         kill -INT "${pid}" 2>/dev/null || true
@@ -29,6 +48,7 @@ cleanup() {
     fi
     rm -rf "${tmpdir}"
 }
+trap dump_failure ERR
 trap cleanup EXIT
 
 XDG_CONFIG_HOME="${tmpdir}/config" XDG_STATE_HOME="${tmpdir}/state" "${mirage_bin}" --no-mdns --diagnostics --port "${port}" >"${tmpdir}/out" 2>"${tmpdir}/err" &

@@ -1619,8 +1619,10 @@ io::task<void> rtsp_session::run_ntp_timing_sender() {
                                                                client_timing_endpoint_);
             mirage::log::trace("NTP timing: sent {} bytes (seq={})", sent, seq);
             seq++;
-            timer.expires_after(std::chrono::milliseconds(500));
-            co_await timer.async_wait();
+            for (int i = 0; i < 10 && state_ != rtsp_session_state::teardown; ++i) {
+                timer.expires_after(std::chrono::milliseconds(50));
+                co_await timer.async_wait();
+            }
         }
     } catch (const std::system_error& e) {
         if (state_ != rtsp_session_state::teardown && e.code() != std::errc::operation_canceled) {
