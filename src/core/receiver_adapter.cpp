@@ -17,6 +17,7 @@ receiver_adapter_status make_adapter(protocol id, bool enabled, uint16_t port, b
         .advertised = false,
         .experimental = experimental,
         .detail = enabled ? std::string(enabled_detail) : "disabled by config",
+        .default_detail = enabled ? std::string(enabled_detail) : "disabled by config",
     };
 }
 
@@ -86,6 +87,7 @@ void receiver_adapter_registry::mark_running(protocol id) {
 void receiver_adapter_registry::mark_error(protocol id, std::string detail) {
     if (auto* adapter = find(id)) {
         adapter->state = receiver_adapter_state::error;
+        adapter->advertised = false;
         adapter->detail = std::move(detail);
     }
 }
@@ -97,6 +99,20 @@ void receiver_adapter_registry::mark_stopped(protocol id) {
 void receiver_adapter_registry::set_state(protocol id, receiver_adapter_state state) {
     if (auto* adapter = find(id)) {
         adapter->state = state;
+        switch (state) {
+            case receiver_adapter_state::disabled:
+            case receiver_adapter_state::stopped:
+                adapter->advertised = false;
+                adapter->detail = adapter->default_detail;
+                break;
+            case receiver_adapter_state::listening:
+            case receiver_adapter_state::running:
+                adapter->detail = adapter->default_detail;
+                break;
+            case receiver_adapter_state::unavailable:
+            case receiver_adapter_state::error:
+                break;
+        }
     }
 }
 

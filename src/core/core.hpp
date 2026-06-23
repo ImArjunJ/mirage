@@ -66,6 +66,7 @@ struct receiver_adapter_status {
     bool advertised = false;
     bool experimental = false;
     std::string detail;
+    std::string default_detail;
 };
 enum class video_codec : uint8_t { h264, hevc, vp8, vp9, av1 };
 constexpr std::string_view to_string(video_codec c) {

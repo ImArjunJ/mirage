@@ -201,6 +201,24 @@ if(BUILD_TESTING)
     target_link_options(mirage_receiver_adapter_test PRIVATE ${MIRAGE_LINK_FLAGS})
     add_test(NAME receiver_adapter COMMAND mirage_receiver_adapter_test)
 
+    add_executable(mirage_receiver_sources_test
+        tests/test_receiver_sources.cpp
+        src/protocols/receiver_sources.cpp
+        src/protocols/airplay/source.cpp
+        src/protocols/cast/source.cpp
+        src/protocols/wfd/source.cpp
+        src/crypto/aes_ctr.cpp
+        src/crypto/fairplay_pairing.cpp
+        src/crypto/fairplay_sap.cpp
+        src/crypto/srp6a.cpp
+        src/crypto/tlv8_chacha.cpp
+    )
+    target_include_directories(mirage_receiver_sources_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_options(mirage_receiver_sources_test PRIVATE ${MIRAGE_CXX_FLAGS})
+    target_link_options(mirage_receiver_sources_test PRIVATE ${MIRAGE_LINK_FLAGS})
+    target_link_libraries(mirage_receiver_sources_test PRIVATE OpenSSL::Crypto)
+    add_test(NAME receiver_sources COMMAND mirage_receiver_sources_test)
+
     add_executable(mirage_receiver_session_test
         tests/test_receiver_session.cpp
         src/core/receiver_adapter.cpp

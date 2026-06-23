@@ -108,10 +108,20 @@ int main() {
     ok &= expect(cast->state == mirage::receiver_adapter_state::error,
                  "cast error transition mismatch");
     ok &= expect(cast->detail == std::string("bind failed"), "cast error detail mismatch");
+    ok &= expect(!cast->advertised, "cast error did not clear advertised state");
 
+    adapters.mark_error(mirage::protocol::airplay, "bind failed");
+    ok &= expect(airplay->state == mirage::receiver_adapter_state::error,
+                 "airplay error transition mismatch");
+    ok &= expect(!airplay->advertised, "airplay error did not clear advertised state");
+    adapters.mark_listening(mirage::protocol::airplay);
+    adapters.mark_advertised(mirage::protocol::airplay);
+    ok &= expect(airplay->detail == std::string("rtsp/raop receiver"),
+                 "airplay healthy transition did not restore detail");
     adapters.mark_stopped(mirage::protocol::airplay);
     ok &= expect(airplay->state == mirage::receiver_adapter_state::stopped,
                  "airplay stopped transition mismatch");
+    ok &= expect(!airplay->advertised, "airplay stopped transition did not clear advertised state");
 
     mirage::receiver_source_registry source_registry({
         mirage::receiver_source_descriptor{
