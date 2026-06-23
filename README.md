@@ -7,8 +7,8 @@ AirPlay, Google Cast, and Miracast / Wi-Fi Display. The core owns discovery,
 sessions, media setup, decode, rendering, audio output, diagnostics, and daemon
 state.
 
-Right now, AirPlay is the useful path. Cast has discovery, probe, and basic
-status replies. Miracast / WFD has capability negotiation. Cast and WFD media
+Right now, AirPlay is the useful path. Cast has discovery, probe, and receiver
+control replies. Miracast / WFD has capability negotiation. Cast and WFD media
 streaming are not implemented yet.
 
 ## status

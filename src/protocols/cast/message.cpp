@@ -155,6 +155,66 @@ std::optional<std::string> extract_json_string(std::string_view json, std::strin
     return std::nullopt;
 }
 
+std::vector<std::string> extract_json_string_array(std::string_view json, std::string_view key) {
+    std::vector<std::string> values;
+    const auto needle = std::format("\"{}\"", key);
+    auto pos = json.find(needle);
+    if (pos == std::string_view::npos) {
+        return values;
+    }
+    pos = json.find(':', pos + needle.size());
+    if (pos == std::string_view::npos) {
+        return values;
+    }
+    ++pos;
+    while (pos < json.size() && std::isspace(static_cast<unsigned char>(json[pos])) != 0) {
+        ++pos;
+    }
+    if (pos >= json.size()) {
+        return values;
+    }
+    if (json[pos] == '"') {
+        if (auto single = extract_json_string(json, key)) {
+            values.push_back(std::move(*single));
+        }
+        return values;
+    }
+    if (json[pos] != '[') {
+        return values;
+    }
+    ++pos;
+
+    while (pos < json.size()) {
+        while (pos < json.size() &&
+               (std::isspace(static_cast<unsigned char>(json[pos])) != 0 || json[pos] == ',')) {
+            ++pos;
+        }
+        if (pos >= json.size() || json[pos] == ']') {
+            break;
+        }
+        if (json[pos] != '"') {
+            break;
+        }
+        ++pos;
+
+        std::string value;
+        while (pos < json.size()) {
+            char c = json[pos++];
+            if (c == '\\' && pos < json.size()) {
+                value.push_back(json[pos++]);
+                continue;
+            }
+            if (c == '"') {
+                values.push_back(std::move(value));
+                break;
+            }
+            value.push_back(c);
+        }
+    }
+
+    return values;
+}
+
 std::optional<int64_t> extract_json_int(std::string_view json, std::string_view key) {
     const auto needle = std::format("\"{}\"", key);
     auto pos = json.find(needle);
@@ -188,6 +248,13 @@ std::optional<int64_t> extract_json_int(std::string_view json, std::string_view 
     return value;
 }
 
+std::string request_id_fragment(std::optional<int64_t> request_id) {
+    if (!request_id) {
+        return {};
+    }
+    return std::format(",\"requestId\":{}", *request_id);
+}
+
 channel_message make_string_message(std::string_view destination_id, std::string_view namespace_,
                                     std::string payload) {
     return {
@@ -199,6 +266,32 @@ channel_message make_string_message(std::string_view destination_id, std::string
         .payload_utf8 = std::move(payload),
         .payload_binary = {},
     };
+}
+
+std::string launch_error_payload(std::optional<int64_t> request_id) {
+    return std::format("{{\"type\":\"LAUNCH_ERROR\",\"reason\":\"NOT_SUPPORTED\"{}}}",
+                       request_id_fragment(request_id));
+}
+
+std::string load_failed_payload(std::optional<int64_t> request_id) {
+    return std::format(
+        "{{\"type\":\"LOAD_FAILED\",\"reason\":\"RECEIVER_APP_NOT_RUNNING\"{}}}",
+        request_id_fragment(request_id));
+}
+
+std::string app_availability_payload(std::span<const std::string> app_ids,
+                                     std::optional<int64_t> request_id) {
+    std::string body = "{\"type\":\"GET_APP_AVAILABILITY\",\"availability\":{";
+    for (size_t i = 0; i < app_ids.size(); ++i) {
+        if (i != 0) {
+            body += ',';
+        }
+        body += std::format("\"{}\":\"APP_NOT_AVAILABLE\"", json_escape(app_ids[i]));
+    }
+    body += "}";
+    body += request_id_fragment(request_id);
+    body += "}";
+    return body;
 }
 
 }  // namespace
@@ -328,9 +421,7 @@ std::string receiver_status_payload(std::string_view device_name,
         "\"isActiveInput\":true,"
         "\"friendlyName\":\"{}\"}}",
         json_escape(device_name));
-    if (request_id) {
-        body += std::format(",\"requestId\":{}", *request_id);
-    }
+    body += request_id_fragment(request_id);
     body += "}";
     return body;
 }
@@ -358,6 +449,38 @@ std::vector<channel_message> handle_channel_message(const channel_message& messa
             message.source_id, namespace_receiver,
             receiver_status_payload(device_name, extract_json_int(message.payload_utf8,
                                                                   "requestId"))));
+        return responses;
+    }
+
+    if (message.namespace_ == namespace_receiver && *type == "GET_APP_AVAILABILITY") {
+        auto app_ids = extract_json_string_array(message.payload_utf8, "appId");
+        responses.push_back(make_string_message(
+            message.source_id, namespace_receiver,
+            app_availability_payload(app_ids, extract_json_int(message.payload_utf8,
+                                                               "requestId"))));
+        return responses;
+    }
+
+    if (message.namespace_ == namespace_receiver && *type == "LAUNCH") {
+        responses.push_back(make_string_message(
+            message.source_id, namespace_receiver,
+            launch_error_payload(extract_json_int(message.payload_utf8, "requestId"))));
+        return responses;
+    }
+
+    if (message.namespace_ == namespace_receiver &&
+        (*type == "STOP" || *type == "SET_VOLUME")) {
+        responses.push_back(make_string_message(
+            message.source_id, namespace_receiver,
+            receiver_status_payload(device_name, extract_json_int(message.payload_utf8,
+                                                                  "requestId"))));
+        return responses;
+    }
+
+    if (message.namespace_ == namespace_media && *type == "LOAD") {
+        responses.push_back(make_string_message(
+            message.source_id, namespace_media,
+            load_failed_payload(extract_json_int(message.payload_utf8, "requestId"))));
         return responses;
     }
 

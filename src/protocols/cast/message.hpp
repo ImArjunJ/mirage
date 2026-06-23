@@ -16,6 +16,7 @@ inline constexpr std::string_view namespace_connection =
     "urn:x-cast:com.google.cast.tp.connection";
 inline constexpr std::string_view namespace_heartbeat = "urn:x-cast:com.google.cast.tp.heartbeat";
 inline constexpr std::string_view namespace_receiver = "urn:x-cast:com.google.cast.receiver";
+inline constexpr std::string_view namespace_media = "urn:x-cast:com.google.cast.media";
 inline constexpr std::string_view receiver_source_id = "receiver-0";
 
 enum class channel_payload_type : uint8_t {

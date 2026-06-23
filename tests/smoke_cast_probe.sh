@@ -121,6 +121,30 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     assert b"RECEIVER_STATUS" in response
     assert b'"requestId":1' in response
     assert b'"friendlyName":"Mirage"' in response
+
+    sock.sendall(
+        cast_message(
+            "urn:x-cast:com.google.cast.receiver",
+            '{"type":"GET_APP_AVAILABILITY","requestId":2,"appId":["CC1AD845"]}',
+        )
+    )
+    length = struct.unpack(">I", recv_exact(sock, 4))[0]
+    response = recv_exact(sock, length)
+    assert b"GET_APP_AVAILABILITY" in response
+    assert b'"CC1AD845":"APP_NOT_AVAILABLE"' in response
+    assert b'"requestId":2' in response
+
+    sock.sendall(
+        cast_message(
+            "urn:x-cast:com.google.cast.receiver",
+            '{"type":"LAUNCH","requestId":3,"appId":"CC1AD845"}',
+        )
+    )
+    length = struct.unpack(">I", recv_exact(sock, 4))[0]
+    response = recv_exact(sock, length)
+    assert b"LAUNCH_ERROR" in response
+    assert b'"reason":"NOT_SUPPORTED"' in response
+    assert b'"requestId":3' in response
 PY
 
 kill -INT "${pid}"
