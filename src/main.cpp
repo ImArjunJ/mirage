@@ -154,6 +154,14 @@ std::filesystem::path identity_key_path(const mirage::config& cfg) {
     return state_dir() / "identity.key";
 }
 
+std::string inspect_port_command(uint16_t port) {
+#ifdef _WIN32
+    return std::format("netstat -ano | findstr :{}", port);
+#else
+    return std::format("lsof -i :{}", port);
+#endif
+}
+
 std::string trim_ascii(std::string value) {
     while (!value.empty() && (value.back() == ' ' || value.back() == '\t' || value.back() == '\r' ||
                               value.back() == '\n')) {
@@ -548,11 +556,15 @@ int handle_status(bool verbose) {
     if (verbose) {
         auto airplay_port = extract_int("airplay_port");
         auto cast_port = extract_int("cast_port");
+        auto miracast_port = extract_int("miracast_port");
         if (airplay_port) {
             std::println(stderr, "  airplay port: {}", *airplay_port);
         }
         if (cast_port) {
             std::println(stderr, "  cast port: {}", *cast_port);
+        }
+        if (miracast_port) {
+            std::println(stderr, "  miracast port: {}", *miracast_port);
         }
         auto identity_key = extract_string("identity_key");
         if (!identity_key.empty()) {
@@ -610,11 +622,22 @@ int handle_status(bool verbose) {
     return 0;
 }
 
-void write_pid_file(int pid) {
+bool write_pid_file(int pid) {
     auto dir = state_dir();
-    std::filesystem::create_directories(dir);
-    std::ofstream f(pid_file_path());
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if (ec) {
+        std::println(stderr, "could not create state directory: {}", ec.message());
+        return false;
+    }
+    auto path = pid_file_path();
+    std::ofstream f(path, std::ios::trunc);
+    if (!f) {
+        std::println(stderr, "could not write pid file: {}", path.string());
+        return false;
+    }
     f << pid;
+    return true;
 }
 
 void remove_pid_file() {
@@ -623,15 +646,28 @@ void remove_pid_file() {
     std::filesystem::remove(status_file_path(), ec);
 }
 
-void write_status_json(int pid, const mirage::config& cfg, const std::string& ip,
+bool write_status_json(int pid, const mirage::config& cfg, const std::string& ip,
                        const std::string& iface_name, const std::filesystem::path& identity_path,
                        std::span<const mirage::receiver_adapter_status> adapters,
                        std::span<const mirage::receiver_source_descriptor> sources) {
     auto now = std::chrono::system_clock::now();
     auto started = std::chrono::system_clock::to_time_t(now);
     auto path = status_file_path();
+    auto tmp_path = path;
+    tmp_path += ".tmp";
     auto identity_key = identity_path.string();
-    std::ofstream f(path);
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    if (ec) {
+        mirage::log::warn("could not create status directory {}: {}", path.parent_path().string(),
+                          ec.message());
+        return false;
+    }
+    std::ofstream f(tmp_path, std::ios::trunc);
+    if (!f) {
+        mirage::log::warn("could not write status file: {}", tmp_path.string());
+        return false;
+    }
     f << mirage::render_status_json({
         .pid = pid,
         .name = cfg.device_name,
@@ -640,10 +676,31 @@ void write_status_json(int pid, const mirage::config& cfg, const std::string& ip
         .identity_key = identity_key,
         .airplay_port = cfg.airplay_port,
         .cast_port = cfg.cast_port,
+        .miracast_port = cfg.miracast_port,
         .started = started,
         .adapters = adapters,
         .sources = sources,
     });
+    f.close();
+    if (!f) {
+        mirage::log::warn("could not finish writing status file: {}", tmp_path.string());
+        std::filesystem::remove(tmp_path, ec);
+        return false;
+    }
+
+    std::filesystem::rename(tmp_path, path, ec);
+    if (ec) {
+        std::error_code remove_ec;
+        std::filesystem::remove(path, remove_ec);
+        ec.clear();
+        std::filesystem::rename(tmp_path, path, ec);
+    }
+    if (ec) {
+        mirage::log::warn("could not publish status file {}: {}", path.string(), ec.message());
+        std::filesystem::remove(tmp_path, ec);
+        return false;
+    }
+    return true;
 }
 
 void print_receiver_start_error(mirage::protocol id, uint16_t port,
@@ -651,17 +708,22 @@ void print_receiver_start_error(mirage::protocol id, uint16_t port,
     switch (id) {
         case mirage::protocol::airplay:
             std::println(stderr, "could not start airplay on port {}.", port);
+            std::println(stderr, "  {}", error.message);
             std::println(stderr,
                          "  the port may be in use. try --port <port> to use a different one,");
-            std::println(stderr, "  or run: lsof -i :{}", port);
+            std::println(stderr, "  or run: {}", inspect_port_command(port));
             break;
         case mirage::protocol::cast:
             std::println(stderr, "could not start cast on port {}.", port);
+            std::println(stderr, "  {}", error.message);
             std::println(stderr, "  the port may be in use. try a different port or check:");
-            std::println(stderr, "  lsof -i :{}", port);
+            std::println(stderr, "  {}", inspect_port_command(port));
             break;
         case mirage::protocol::miracast:
-            mirage::log::error("failed to start miracast: {}", error.message);
+            std::println(stderr, "could not start miracast on port {}.", port);
+            std::println(stderr, "  {}", error.message);
+            std::println(stderr, "  the port may be in use. try a different port or check:");
+            std::println(stderr, "  {}", inspect_port_command(port));
             break;
     }
 }
@@ -684,7 +746,9 @@ bool daemonize() {
     auto dir = state_dir();
     std::filesystem::create_directories(dir);
     FreeConsole();
-    write_pid_file(current_pid());
+    if (!write_pid_file(current_pid())) {
+        return false;
+    }
 
     auto log_path = dir / "mirage.log";
     FILE* log_file = nullptr;
@@ -710,7 +774,9 @@ bool daemonize(pid_t& child_pid) {
         return false;
     }
     if (child_pid > 0) {
-        write_pid_file(static_cast<int>(child_pid));
+        if (!write_pid_file(static_cast<int>(child_pid))) {
+            _exit(1);
+        }
         std::println(stderr, "mirage started (pid {})", child_pid);
         _exit(0);
     }
@@ -734,7 +800,9 @@ bool daemonize(pid_t& child_pid) {
         close(log_fd);
     }
 
-    write_pid_file(current_pid());
+    if (!write_pid_file(current_pid())) {
+        return false;
+    }
     return true;
 }
 #endif
@@ -861,7 +929,9 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         remove_pid_file();
-        write_pid_file(current_pid());
+        if (!write_pid_file(current_pid())) {
+            return 1;
+        }
         owns_runtime_files = true;
     }
 

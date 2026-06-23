@@ -83,6 +83,7 @@ int main() {
         .identity_key = "/tmp/mirage/key",
         .airplay_port = 7000,
         .cast_port = 8009,
+        .miracast_port = 7236,
         .started = 123456,
         .adapters = adapters.all(),
         .sources = sources,
@@ -93,6 +94,9 @@ int main() {
                  "escaped name mismatch");
     ok &= expect(contains(json, "\"identity_key\":\"/tmp/mirage/key\""),
                  "identity key missing");
+    ok &= expect(contains(json, "\"airplay_port\":7000"), "airplay port missing");
+    ok &= expect(contains(json, "\"cast_port\":8009"), "cast port missing");
+    ok &= expect(contains(json, "\"miracast_port\":7236"), "miracast port missing");
     ok &= expect(contains(json, "\"started\":123456"), "started time missing");
     ok &= expect(contains(json, "\"id\":\"airplay\""), "airplay protocol missing");
     ok &= expect(contains(json, "\"state\":\"listening\""), "airplay state missing");

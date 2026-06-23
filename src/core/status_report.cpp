@@ -53,6 +53,7 @@ std::string render_status_json(const receiver_status_report& report) {
     out << ",\"identity_key\":\"" << json_escape(report.identity_key) << "\"";
     out << ",\"airplay_port\":" << report.airplay_port;
     out << ",\"cast_port\":" << report.cast_port;
+    out << ",\"miracast_port\":" << report.miracast_port;
     out << ",\"started\":" << report.started;
     out << ",\"protocols\":[";
     for (size_t i = 0; i < report.adapters.size(); ++i) {
