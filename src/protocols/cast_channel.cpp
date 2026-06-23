@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <array>
 #include <cstddef>
+#include <format>
 #include <memory>
 #include <span>
 #include <string>
@@ -59,6 +60,72 @@ receiver_client_stream_status control_stream_status(std::string reason) {
     };
 }
 
+receiver_client_stream_status app_stream_status(std::string reason) {
+    return {
+        .kind = "app",
+        .health = "clean",
+        .reason = std::move(reason),
+    };
+}
+
+receiver_client_stream_status media_attention_status(std::string reason) {
+    return {
+        .kind = "media",
+        .health = "attention",
+        .reason = std::move(reason),
+    };
+}
+
+void publish_cast_activity(receiver_session_observer* observer, uint64_t client_status_id,
+                           const cast::channel_activity& activity) {
+    if (activity.event == cast::channel_event::none) {
+        return;
+    }
+
+    switch (activity.event) {
+        case cast::channel_event::none:
+            break;
+        case cast::channel_event::default_media_started:
+            if (observer != nullptr && client_status_id != 0) {
+                observer->client_stream_updated(client_status_id,
+                                                app_stream_status("default_media_running"));
+            }
+            mirage::log::diagnostic("Cast app: default media receiver running");
+            break;
+        case cast::channel_event::default_media_stopped:
+            if (observer != nullptr && client_status_id != 0) {
+                observer->client_stream_updated(client_status_id,
+                                                app_stream_status("default_media_stopped"));
+            }
+            mirage::log::diagnostic("Cast app: default media receiver stopped");
+            break;
+        case cast::channel_event::volume_updated:
+            if (observer != nullptr && client_status_id != 0) {
+                observer->client_stream_updated(
+                    client_status_id,
+                    control_stream_status(std::format("volume_updated:{}", activity.detail)));
+            }
+            mirage::log::diagnostic("Cast control: volume_updated={}", activity.detail);
+            break;
+        case cast::channel_event::media_load_rejected:
+            if (observer != nullptr && client_status_id != 0) {
+                observer->client_stream_updated(
+                    client_status_id,
+                    media_attention_status(std::format("load_failed:{}", activity.detail)));
+            }
+            mirage::log::diagnostic("Cast media: load_failed={}", activity.detail);
+            break;
+        case cast::channel_event::media_command_rejected:
+            if (observer != nullptr && client_status_id != 0) {
+                observer->client_stream_updated(
+                    client_status_id,
+                    media_attention_status(std::format("invalid_request:{}", activity.detail)));
+            }
+            mirage::log::diagnostic("Cast media: invalid_request={}", activity.detail);
+            break;
+    }
+}
+
 io::task<bool> write_cast_frame(io::tcp_stream& socket, std::span<const std::byte> frame) {
     co_await socket.async_write(frame);
     co_return true;
@@ -77,7 +144,9 @@ io::task<bool> write_cast_frame(cast::tls_channel& socket, std::span<const std::
 template <typename Stream>
 io::task<void> handle_ready_frames(Stream& socket, cast::channel_frame_parser& parser,
                                    std::string_view device_name,
-                                   cast::channel_session_state& state) {
+                                   cast::channel_session_state& state,
+                                   receiver_session_observer* observer,
+                                   uint64_t client_status_id) {
     while (auto frame = parser.next_frame()) {
         auto message = cast::parse_channel_message(*frame);
         if (!message) {
@@ -88,8 +157,8 @@ io::task<void> handle_ready_frames(Stream& socket, cast::channel_frame_parser& p
         mirage::log::debug("cast channel: {} -> {} namespace={} payload={} bytes",
                            message->source_id, message->destination_id, message->namespace_,
                            message->payload_utf8.size() + message->payload_binary.size());
-        auto responses = cast::handle_channel_message(*message, device_name, state);
-        for (const auto& response : responses) {
+        auto result = cast::handle_channel_message_result(*message, device_name, state);
+        for (const auto& response : result.responses) {
             auto payload = cast::serialize_channel_message(response);
             if (!payload) {
                 mirage::log::debug("cast channel: failed to serialize response: {}",
@@ -108,19 +177,22 @@ io::task<void> handle_ready_frames(Stream& socket, cast::channel_frame_parser& p
                 co_return;
             }
         }
+        publish_cast_activity(observer, client_status_id, result.activity);
     }
 }
 
 io::task<void> handle_cast_channel(io::tcp_stream& socket, std::string_view first_packet,
                                    std::string_view device_name,
-                                   cast::channel_session_state& state) {
+                                   cast::channel_session_state& state,
+                                   receiver_session_observer* observer,
+                                   uint64_t client_status_id) {
     cast::channel_frame_parser parser;
     auto appended = parser.append(byte_view(first_packet));
     if (!appended) {
         mirage::log::debug("cast channel: rejected frame prefix: {}", appended.error().message);
         co_return;
     }
-    co_await handle_ready_frames(socket, parser, device_name, state);
+    co_await handle_ready_frames(socket, parser, device_name, state, observer, client_status_id);
 
     std::array<std::byte, 2048> buffer{};
     while (socket.is_open()) {
@@ -133,12 +205,15 @@ io::task<void> handle_cast_channel(io::tcp_stream& socket, std::string_view firs
             mirage::log::debug("cast channel: rejected frame: {}", appended.error().message);
             co_return;
         }
-        co_await handle_ready_frames(socket, parser, device_name, state);
+        co_await handle_ready_frames(socket, parser, device_name, state, observer,
+                                     client_status_id);
     }
 }
 
 io::task<void> handle_cast_tls_channel(io::tcp_stream socket, std::string_view first_packet,
-                                       std::string device_name) {
+                                       std::string device_name,
+                                       receiver_session_observer* observer,
+                                       uint64_t client_status_id) {
     auto accepted = co_await cast::tls_channel::accept(std::move(socket), byte_view(first_packet));
     if (!accepted) {
         mirage::log::debug("cast tls channel: handshake failed: {}", accepted.error().message);
@@ -165,11 +240,13 @@ io::task<void> handle_cast_tls_channel(io::tcp_stream socket, std::string_view f
             mirage::log::debug("cast tls channel: rejected frame: {}", appended.error().message);
             co_return;
         }
-        co_await handle_ready_frames(tls, parser, device_name, state);
+        co_await handle_ready_frames(tls, parser, device_name, state, observer, client_status_id);
     }
 }
 
-io::task<void> handle_cast_connection(io::tcp_stream socket, std::string device_name) {
+io::task<void> handle_cast_connection(io::tcp_stream socket, std::string device_name,
+                                      receiver_session_observer* observer,
+                                      uint64_t client_status_id) {
     std::array<std::byte, 2048> buffer{};
     try {
         auto n = co_await socket.async_read(buffer);
@@ -184,14 +261,16 @@ io::task<void> handle_cast_connection(io::tcp_stream socket, std::string device_
             case cast::probe_kind::tls_client_hello:
                 mirage::log::debug(
                     "cast tls channel: client connected, media channel is not implemented");
-                co_await handle_cast_tls_channel(std::move(socket), data, device_name);
+                co_await handle_cast_tls_channel(std::move(socket), data, device_name, observer,
+                                                 client_status_id);
                 co_return;
             case cast::probe_kind::channel_frame:
                 mirage::log::debug(
                     "cast channel: plaintext frame stream connected, control/status enabled");
                 {
                     cast::channel_session_state state;
-                    co_await handle_cast_channel(socket, data, device_name, state);
+                    co_await handle_cast_channel(socket, data, device_name, state, observer,
+                                                 client_status_id);
                 }
                 break;
             case cast::probe_kind::unsupported:
@@ -212,7 +291,8 @@ io::task<void> handle_cast_connection(io::tcp_stream socket, std::string device_
 io::task<void> handle_observed_cast_connection(io::tcp_stream socket, std::string device_name,
                                                receiver_session_observer* observer,
                                                uint64_t client_status_id) {
-    co_await handle_cast_connection(std::move(socket), std::move(device_name));
+    co_await handle_cast_connection(std::move(socket), std::move(device_name), observer,
+                                    client_status_id);
     if (observer != nullptr && client_status_id != 0) {
         observer->client_disconnected(client_status_id);
     }

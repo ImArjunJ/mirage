@@ -36,13 +36,40 @@ struct channel_message {
     std::vector<std::byte> payload_binary;
 };
 
+enum class channel_event : uint8_t {
+    none,
+    default_media_started,
+    default_media_stopped,
+    volume_updated,
+    media_load_rejected,
+    media_command_rejected,
+};
+
+struct channel_activity {
+    channel_event event = channel_event::none;
+    std::string detail;
+};
+
+struct channel_message_result {
+    std::vector<channel_message> responses;
+    channel_activity activity;
+};
+
 struct channel_session_state {
     bool default_media_running = false;
+    double volume_level = 1.0;
+    bool volume_muted = false;
+    uint64_t rejected_media_loads = 0;
+    uint64_t rejected_media_commands = 0;
+    std::string last_media_error;
 };
 
 result<channel_message> parse_channel_message(std::span<const std::byte> payload);
 result<std::vector<std::byte>> serialize_channel_message(const channel_message& message);
 
+channel_message_result handle_channel_message_result(const channel_message& message,
+                                                     std::string_view device_name,
+                                                     channel_session_state& state);
 std::vector<channel_message> handle_channel_message(const channel_message& message,
                                                     std::string_view device_name);
 std::vector<channel_message> handle_channel_message(const channel_message& message,

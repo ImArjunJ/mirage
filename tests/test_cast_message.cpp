@@ -134,7 +134,8 @@ int main() {
         .payload_utf8 = "{\"type\":\"LAUNCH\",\"requestId\":11,\"appId\":\"CC1AD845\"}",
         .payload_binary = {},
     };
-    auto launch_response = handle_channel_message(launch, "Living Room", state);
+    auto launch_result = handle_channel_message_result(launch, "Living Room", state);
+    auto& launch_response = launch_result.responses;
     ok &= expect(launch_response.size() == 1, "launch response count mismatch");
     if (!launch_response.empty()) {
         ok &= expect(contains(launch_response.front().payload_utf8,
@@ -148,6 +149,9 @@ int main() {
                      "launch transport id mismatch");
         ok &= expect(contains(launch_response.front().payload_utf8, "\"requestId\":11"),
                      "launch request id mismatch");
+        ok &= expect(launch_result.activity.event == channel_event::default_media_started,
+                     "launch activity mismatch");
+        ok &= expect(state.default_media_running, "launch state mismatch");
     }
 
     channel_message unknown_launch{
@@ -178,10 +182,13 @@ int main() {
         .destination_id = "receiver-0",
         .namespace_ = std::string(namespace_receiver),
         .payload_type = channel_payload_type::string_payload,
-        .payload_utf8 = "{\"type\":\"SET_VOLUME\",\"requestId\":12}",
+        .payload_utf8 =
+            "{\"type\":\"SET_VOLUME\",\"requestId\":12,"
+            "\"volume\":{\"level\":0.42,\"muted\":true}}",
         .payload_binary = {},
     };
-    auto volume_response = handle_channel_message(set_volume, "Living Room", state);
+    auto volume_result = handle_channel_message_result(set_volume, "Living Room", state);
+    auto& volume_response = volume_result.responses;
     ok &= expect(volume_response.size() == 1, "set volume response count mismatch");
     if (!volume_response.empty()) {
         ok &= expect(contains(volume_response.front().payload_utf8,
@@ -191,6 +198,14 @@ int main() {
                      "set volume request id mismatch");
         ok &= expect(contains(volume_response.front().payload_utf8, "\"appId\":\"CC1AD845\""),
                      "set volume app state mismatch");
+        ok &= expect(contains(volume_response.front().payload_utf8, "\"level\":0.42"),
+                     "set volume level mismatch");
+        ok &= expect(contains(volume_response.front().payload_utf8, "\"muted\":true"),
+                     "set volume muted mismatch");
+        ok &= expect(volume_result.activity.event == channel_event::volume_updated,
+                     "set volume activity mismatch");
+        ok &= expect(volume_result.activity.detail == "muted", "set volume activity detail");
+        ok &= expect(state.volume_muted, "set volume muted state mismatch");
     }
 
     channel_message load{
@@ -202,7 +217,8 @@ int main() {
         .payload_utf8 = "{\"type\":\"LOAD\",\"requestId\":13}",
         .payload_binary = {},
     };
-    auto load_response = handle_channel_message(load, "Living Room", state);
+    auto load_result = handle_channel_message_result(load, "Living Room", state);
+    auto& load_response = load_result.responses;
     ok &= expect(load_response.size() == 1, "load response count mismatch");
     if (!load_response.empty()) {
         ok &= expect(load_response.front().namespace_ == namespace_media,
@@ -214,6 +230,11 @@ int main() {
                      "load failure reason mismatch");
         ok &= expect(contains(load_response.front().payload_utf8, "\"requestId\":13"),
                      "load request id mismatch");
+        ok &= expect(load_result.activity.event == channel_event::media_load_rejected,
+                     "load activity mismatch");
+        ok &= expect(load_result.activity.detail == "MEDIA_NOT_SUPPORTED",
+                     "load activity detail mismatch");
+        ok &= expect(state.rejected_media_loads == 1, "load rejection count mismatch");
     }
 
     channel_message media_status{
@@ -269,7 +290,8 @@ int main() {
         .payload_utf8 = "{\"type\":\"PLAY\",\"requestId\":16,\"mediaSessionId\":1}",
         .payload_binary = {},
     };
-    auto media_play_response = handle_channel_message(media_play, "Living Room");
+    auto media_play_result = handle_channel_message_result(media_play, "Living Room", state);
+    auto& media_play_response = media_play_result.responses;
     ok &= expect(media_play_response.size() == 1, "media play response count mismatch");
     if (!media_play_response.empty()) {
         ok &= expect(contains(media_play_response.front().payload_utf8,
@@ -280,6 +302,10 @@ int main() {
                      "media play invalid reason mismatch");
         ok &= expect(contains(media_play_response.front().payload_utf8, "\"requestId\":16"),
                      "media play request id mismatch");
+        ok &= expect(media_play_result.activity.event == channel_event::media_command_rejected,
+                     "media play activity mismatch");
+        ok &= expect(state.rejected_media_commands == 1,
+                     "media command rejection count mismatch");
     }
 
     channel_message stop{
@@ -292,7 +318,8 @@ int main() {
             "{\"type\":\"STOP\",\"requestId\":18,\"sessionId\":\"default-media-session\"}",
         .payload_binary = {},
     };
-    auto stop_response = handle_channel_message(stop, "Living Room", state);
+    auto stop_result = handle_channel_message_result(stop, "Living Room", state);
+    auto& stop_response = stop_result.responses;
     ok &= expect(stop_response.size() == 1, "receiver stop response count mismatch");
     if (!stop_response.empty()) {
         ok &= expect(contains(stop_response.front().payload_utf8,
@@ -302,6 +329,9 @@ int main() {
                      "receiver stop app state mismatch");
         ok &= expect(contains(stop_response.front().payload_utf8, "\"requestId\":18"),
                      "receiver stop request id mismatch");
+        ok &= expect(stop_result.activity.event == channel_event::default_media_stopped,
+                     "receiver stop activity mismatch");
+        ok &= expect(!state.default_media_running, "receiver stop state mismatch");
     }
 
     std::vector<std::byte> invalid_varint(12, std::byte{0x80});

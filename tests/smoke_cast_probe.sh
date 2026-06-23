@@ -191,6 +191,31 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     assert b'"appId":"CC1AD845"' in response
     assert b'"transportId":"web-1"' in response
     assert b'"requestId":3' in response
+    wait_status_contains(
+        '"protocol":"cast"',
+        '"kind":"app"',
+        '"health":"clean"',
+        '"reason":"default_media_running"',
+    )
+
+    sock.sendall(
+        cast_message(
+            "urn:x-cast:com.google.cast.receiver",
+            '{"type":"SET_VOLUME","requestId":11,"volume":{"level":0.42,"muted":true}}',
+        )
+    )
+    length = struct.unpack(">I", recv_exact(sock, 4))[0]
+    response = recv_exact(sock, length)
+    assert b"RECEIVER_STATUS" in response
+    assert b'"level":0.42' in response
+    assert b'"muted":true' in response
+    assert b'"requestId":11' in response
+    wait_status_contains(
+        '"protocol":"cast"',
+        '"kind":"control"',
+        '"health":"clean"',
+        '"reason":"volume_updated:muted"',
+    )
 
     sock.sendall(
         cast_message(
@@ -215,6 +240,12 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     assert b"LOAD_FAILED" in response
     assert b'"reason":"MEDIA_NOT_SUPPORTED"' in response
     assert b'"requestId":7' in response
+    wait_status_contains(
+        '"protocol":"cast"',
+        '"kind":"media"',
+        '"health":"attention"',
+        '"reason":"load_failed:MEDIA_NOT_SUPPORTED"',
+    )
 
     sock.sendall(
         cast_message(
@@ -227,6 +258,12 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     assert b"INVALID_REQUEST" in response
     assert b'"reason":"INVALID_MEDIA_SESSION_ID"' in response
     assert b'"requestId":8' in response
+    wait_status_contains(
+        '"protocol":"cast"',
+        '"kind":"media"',
+        '"health":"attention"',
+        '"reason":"invalid_request:INVALID_MEDIA_SESSION_ID"',
+    )
 
     sock.sendall(
         cast_message(
@@ -239,6 +276,12 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     assert b"RECEIVER_STATUS" in response
     assert b'"applications":[]' in response
     assert b'"requestId":10' in response
+    wait_status_contains(
+        '"protocol":"cast"',
+        '"kind":"app"',
+        '"health":"clean"',
+        '"reason":"default_media_stopped"',
+    )
 
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 context.check_hostname = False
@@ -289,5 +332,9 @@ wait "${pid}"
 pid=
 
 grep -q "Cast stream setup: mode=tls_control_status" "${tmpdir}/err"
+grep -q "Cast app: default media receiver running" "${tmpdir}/err"
+grep -q "Cast control: volume_updated=muted" "${tmpdir}/err"
+grep -q "Cast media: load_failed=MEDIA_NOT_SUPPORTED" "${tmpdir}/err"
+grep -q "Cast media: invalid_request=INVALID_MEDIA_SESSION_ID" "${tmpdir}/err"
 test -s "${tmpdir}/state/mirage/identity.key"
 grep -Eq '^[A-Za-z0-9+/]{43}=$' "${tmpdir}/state/mirage/identity.key"
