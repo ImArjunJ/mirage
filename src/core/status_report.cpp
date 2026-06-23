@@ -330,7 +330,7 @@ std::string format_media_time(int64_t millis) {
 
 bool is_default_protocol_detail(std::string_view detail) {
     return detail == "disabled by config" || detail == "rtsp/raop receiver" ||
-           detail == "cast v2 control/media status receiver" ||
+           detail == "cast v2 app/media control receiver" ||
            detail == "wfd control/media lifecycle receiver";
 }
 

@@ -39,9 +39,9 @@ int main() {
                  "get response status mismatch");
     ok &= expect(contains(get.response, "\"name\":\"Living Room\""),
                  "get response name mismatch");
-    ok &= expect(contains(get.response, "\"status\":\"control_ready\""),
+    ok &= expect(contains(get.response, "\"status\":\"app_media_ready\""),
                  "get response status body mismatch");
-    ok &= expect(contains(get.response, "media launch is not implemented yet"),
+    ok &= expect(contains(get.response, "media rendering is not implemented yet"),
                  "get response detail mismatch");
 
     auto head = mirage::protocols::cast::handle_probe(
@@ -50,7 +50,7 @@ int main() {
                  "head probe kind mismatch");
     ok &= expect(contains(head.response, "HTTP/1.1 200 OK"), "head response status mismatch");
     ok &= expect(contains(head.response, "Content-Length: 0"), "head content length mismatch");
-    ok &= expect(!contains(head.response, "\"status\":\"control_ready\""),
+    ok &= expect(!contains(head.response, "\"status\":\"app_media_ready\""),
                  "head response unexpectedly included a body");
 
     std::string tls_client_hello;

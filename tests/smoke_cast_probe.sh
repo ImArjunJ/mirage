@@ -78,7 +78,7 @@ exec 3>&-
 
 printf "%s" "${response}" | grep -q "HTTP/1.1 200 OK"
 printf "%s" "${response}" | grep -q '"receiver":"cast-v2"'
-printf "%s" "${response}" | grep -q '"status":"control_ready"'
+printf "%s" "${response}" | grep -q '"status":"app_media_ready"'
 
 python3 - "${port}" "${status_json}" <<'PY'
 import pathlib

@@ -11,7 +11,7 @@ discovery, control, and status before media rendering.
 ## status
 
 - airplay mirroring and audio work on the tested ios path
-- cast has discovery, probe, tls control, app/media status, and volume events
+- cast has discovery, probe, tls control, app/media status, and remote events
 - miracast / wfd has capability negotiation and setup/play/pause control state
 - linux is the main runtime target
 - windows builds in ci; runtime support is early
