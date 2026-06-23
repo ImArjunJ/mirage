@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <span>
 #include <sstream>
 #include <utility>
@@ -10,6 +11,11 @@ namespace mirage::protocols::wfd {
 namespace {
 
 struct parameter_value {
+    std::string_view name;
+    std::string_view value;
+};
+
+struct parsed_parameter {
     std::string_view name;
     std::string_view value;
 };
@@ -60,9 +66,56 @@ std::vector<std::string_view> requested_names(std::string_view request_body) {
     return names;
 }
 
+std::vector<parsed_parameter> parse_parameter_lines(std::string_view body) {
+    std::vector<parsed_parameter> parameters;
+    while (!body.empty()) {
+        auto newline = body.find('\n');
+        auto line = newline == std::string_view::npos ? body : body.substr(0, newline);
+        body.remove_prefix(newline == std::string_view::npos ? body.size() : newline + 1);
+        line = trim(line);
+        if (line.empty()) {
+            continue;
+        }
+        auto colon = line.find(':');
+        if (colon == std::string_view::npos) {
+            parameters.push_back({.name = line, .value = {}});
+            continue;
+        }
+        parameters.push_back({
+            .name = trim(line.substr(0, colon)),
+            .value = trim(line.substr(colon + 1)),
+        });
+    }
+    return parameters;
+}
+
 bool requested(std::span<const std::string_view> names, std::string_view capability_name) {
     return names.empty() ||
            std::ranges::find(names, capability_name) != names.end();
+}
+
+bool equals_ascii_case(std::string_view lhs, std::string_view rhs) {
+    return lhs.size() == rhs.size() &&
+           std::ranges::equal(lhs, rhs, [](char a, char b) {
+               return std::tolower(static_cast<unsigned char>(a)) ==
+                      std::tolower(static_cast<unsigned char>(b));
+           });
+}
+
+bool has_capability(std::string_view name) {
+    return std::ranges::any_of(capabilities, [name](const parameter_value& capability) {
+        return capability.name == name;
+    });
+}
+
+bool known_set_parameter(std::string_view name) {
+    return has_capability(name) || name == "wfd_trigger_method" ||
+           name.starts_with("wfd_");
+}
+
+bool media_trigger_value(std::string_view value) {
+    return equals_ascii_case(value, "SETUP") || equals_ascii_case(value, "PLAY") ||
+           equals_ascii_case(value, "PAUSE") || equals_ascii_case(value, "RECORD");
 }
 
 control_response make_simple_response(int code, std::string text) {
@@ -76,6 +129,18 @@ control_response make_simple_response(int code, std::string text) {
 control_response media_not_implemented() {
     auto response = make_simple_response(501, "Media Not Implemented");
     response.body = "wfd_error: media-not-implemented\r\n";
+    response.headers.emplace_back("Content-Type", "text/parameters");
+    return response;
+}
+
+control_response parameter_not_understood(const set_parameter_analysis& analysis) {
+    auto response = make_simple_response(451, "Parameter Not Understood");
+    response.body = "wfd_error: parameter-not-understood\r\n";
+    if (!analysis.parameter.empty()) {
+        response.body += "parameter: ";
+        response.body += analysis.parameter;
+        response.body += "\r\n";
+    }
     response.headers.emplace_back("Content-Type", "text/parameters");
     return response;
 }
@@ -95,6 +160,30 @@ std::string capability_text(std::string_view requested_parameters) {
         body += "\r\n";
     }
     return body;
+}
+
+set_parameter_analysis analyze_set_parameters(std::string_view body) {
+    for (const auto& parameter : parse_parameter_lines(body)) {
+        if (parameter.name.empty() || parameter.value.empty() ||
+            !known_set_parameter(parameter.name)) {
+            return {
+                .result = set_parameter_result::unsupported_parameter,
+                .parameter = std::string(parameter.name),
+                .value = std::string(parameter.value),
+            };
+        }
+
+        if (parameter.name == "wfd_trigger_method" &&
+            media_trigger_value(parameter.value)) {
+            return {
+                .result = set_parameter_result::media_trigger,
+                .parameter = std::string(parameter.name),
+                .value = std::string(parameter.value),
+            };
+        }
+    }
+
+    return {};
 }
 
 result<control_response> handle_control_request(const rtsp_request_head& request,
@@ -117,6 +206,13 @@ result<control_response> handle_control_request(const rtsp_request_head& request
     }
 
     if (request.method == "SET_PARAMETER") {
+        const auto analysis = analyze_set_parameters(body);
+        if (analysis.result == set_parameter_result::media_trigger) {
+            return media_not_implemented();
+        }
+        if (analysis.result == set_parameter_result::unsupported_parameter) {
+            return parameter_not_understood(analysis);
+        }
         auto response = make_simple_response(200, "OK");
         response.headers.emplace_back("Supported", "org.wfa.wfd1.0");
         return response;

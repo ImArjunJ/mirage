@@ -65,6 +65,53 @@ int main() {
                      "GET_PARAMETER body did not honor requested parameters");
     }
 
+    auto accepted_set = mirage::protocols::wfd::analyze_set_parameters(
+        "wfd_video_formats: 00 00 02 10 0001FFFF 1FFFFFFF 00000FFF 00 0000 0000 00 none "
+        "none\r\n"
+        "wfd_client_rtp_ports: RTP/AVP/UDP;unicast 19000 0 mode=play\r\n");
+    ok &= expect(accepted_set.result == mirage::protocols::wfd::set_parameter_result::accepted,
+                 "accepted SET_PARAMETER analysis mismatch");
+
+    auto trigger_set = mirage::protocols::wfd::analyze_set_parameters(
+        "wfd_trigger_method: SETUP\r\n");
+    ok &= expect(trigger_set.result ==
+                     mirage::protocols::wfd::set_parameter_result::media_trigger,
+                 "trigger SET_PARAMETER analysis mismatch");
+    ok &= expect(trigger_set.parameter == "wfd_trigger_method",
+                 "trigger parameter name mismatch");
+
+    auto malformed_set = mirage::protocols::wfd::analyze_set_parameters("not-a-parameter\r\n");
+    ok &= expect(malformed_set.result ==
+                     mirage::protocols::wfd::set_parameter_result::unsupported_parameter,
+                 "malformed SET_PARAMETER analysis mismatch");
+
+    auto set = mirage::protocols::wfd::handle_control_request(
+        request("SET_PARAMETER"), "wfd_client_rtp_ports: RTP/AVP/UDP;unicast 19000 0 mode=play\r\n");
+    ok &= expect(set.has_value(), "SET_PARAMETER response missing");
+    if (set) {
+        ok &= expect(set->status_code == 200, "SET_PARAMETER status mismatch");
+    }
+
+    auto trigger = mirage::protocols::wfd::handle_control_request(
+        request("SET_PARAMETER"), "wfd_trigger_method: SETUP\r\n");
+    ok &= expect(trigger.has_value(), "trigger SET_PARAMETER response missing");
+    if (trigger) {
+        ok &= expect(trigger->status_code == 501,
+                     "trigger SET_PARAMETER should be explicit unsupported media");
+        ok &= expect(contains(trigger->body, "media-not-implemented"),
+                     "trigger unsupported detail missing");
+    }
+
+    auto malformed = mirage::protocols::wfd::handle_control_request(
+        request("SET_PARAMETER"), "not-a-parameter\r\n");
+    ok &= expect(malformed.has_value(), "malformed SET_PARAMETER response missing");
+    if (malformed) {
+        ok &= expect(malformed->status_code == 451,
+                     "malformed SET_PARAMETER status mismatch");
+        ok &= expect(contains(malformed->body, "parameter-not-understood"),
+                     "malformed SET_PARAMETER detail missing");
+    }
+
     auto setup = mirage::protocols::wfd::handle_control_request(request("SETUP"), "");
     ok &= expect(setup.has_value(), "SETUP response missing");
     if (setup) {

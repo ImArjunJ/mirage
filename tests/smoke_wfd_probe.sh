@@ -94,9 +94,28 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     assert "wfd_content_protection: none" in response, response
     assert "wfd_video_formats:" not in response, response
 
+    body = b"wfd_client_rtp_ports: RTP/AVP/UDP;unicast 19000 0 mode=play\r\n"
+    sock.sendall(
+        b"SET_PARAMETER rtsp://127.0.0.1/wfd1.0 RTSP/1.0\r\n"
+        b"CSeq: 3\r\n"
+        b"Content-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body
+    )
+    response = recv_response(sock)
+    assert "RTSP/1.0 200 OK" in response, response
+
+    body = b"wfd_trigger_method: SETUP\r\n"
+    sock.sendall(
+        b"SET_PARAMETER rtsp://127.0.0.1/wfd1.0 RTSP/1.0\r\n"
+        b"CSeq: 4\r\n"
+        b"Content-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body
+    )
+    response = recv_response(sock)
+    assert "RTSP/1.0 501 Media Not Implemented" in response, response
+    assert "wfd_error: media-not-implemented" in response, response
+
     sock.sendall(
         b"SETUP rtsp://127.0.0.1/wfd1.0/streamid=0 RTSP/1.0\r\n"
-        b"CSeq: 3\r\n\r\n"
+        b"CSeq: 5\r\n\r\n"
     )
     response = recv_response(sock)
     assert "RTSP/1.0 501 Media Not Implemented" in response, response
