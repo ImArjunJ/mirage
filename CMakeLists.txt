@@ -118,6 +118,7 @@ add_executable(mirage
     src/render/vulkan_renderer.cpp
     src/protocols/rtsp_server.cpp
     src/protocols/cast_channel.cpp
+    src/protocols/cast/framing.cpp
     src/protocols/cast/probe.cpp
     src/protocols/wfd_session.cpp
     src/protocols/receiver_sources.cpp
@@ -196,12 +197,23 @@ if(BUILD_TESTING)
 
     add_executable(mirage_cast_probe_test
         tests/test_cast_probe.cpp
+        src/protocols/cast/framing.cpp
         src/protocols/cast/probe.cpp
     )
     target_include_directories(mirage_cast_probe_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_compile_options(mirage_cast_probe_test PRIVATE ${MIRAGE_CXX_FLAGS})
     target_link_options(mirage_cast_probe_test PRIVATE ${MIRAGE_LINK_FLAGS})
     add_test(NAME cast_probe COMMAND mirage_cast_probe_test)
+
+    add_executable(mirage_cast_framing_test
+        tests/test_cast_framing.cpp
+        src/protocols/cast/framing.cpp
+        src/protocols/cast/probe.cpp
+    )
+    target_include_directories(mirage_cast_framing_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_options(mirage_cast_framing_test PRIVATE ${MIRAGE_CXX_FLAGS})
+    target_link_options(mirage_cast_framing_test PRIVATE ${MIRAGE_LINK_FLAGS})
+    add_test(NAME cast_framing COMMAND mirage_cast_framing_test)
 
     add_executable(mirage_receiver_adapter_test
         tests/test_receiver_adapter.cpp

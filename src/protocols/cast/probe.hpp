@@ -10,6 +10,7 @@ enum class probe_kind : uint8_t {
     http_options,
     http_status,
     tls_client_hello,
+    channel_frame,
     unsupported,
 };
 

@@ -4,6 +4,8 @@
 #include <string>
 #include <string_view>
 
+#include "protocols/cast/framing.hpp"
+
 namespace mirage::protocols::cast {
 namespace {
 
@@ -89,6 +91,10 @@ probe_response handle_probe(std::string_view data, std::string_view device_name)
             json_escape(device_name));
         return {.kind = probe_kind::http_status,
                 .response = http_response(501, "Not Implemented", body, !is_head)};
+    }
+
+    if (looks_like_channel_frame(data)) {
+        return {.kind = probe_kind::channel_frame, .response = {}};
     }
 
     return {.kind = probe_kind::unsupported, .response = {}};

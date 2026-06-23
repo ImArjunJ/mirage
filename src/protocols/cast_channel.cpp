@@ -11,6 +11,7 @@
 #include "core/core.hpp"
 #include "core/log.hpp"
 #include "io/io.hpp"
+#include "protocols/cast/framing.hpp"
 #include "protocols/cast/probe.hpp"
 #include "protocols/protocols.hpp"
 namespace mirage::protocols {
@@ -39,6 +40,42 @@ result<cast_receiver> cast_receiver::bind(io::io_context& ctx, uint16_t port,
 
 namespace {
 
+std::span<const std::byte> byte_view(std::string_view data) {
+    return std::as_bytes(std::span<const char>(data.data(), data.size()));
+}
+
+void log_ready_frames(cast::channel_frame_parser& parser) {
+    while (auto frame = parser.next_frame()) {
+        mirage::log::debug(
+            "cast channel: received {} byte frame, message handling is not implemented",
+            frame->size());
+    }
+}
+
+io::task<void> handle_cast_channel(io::tcp_stream& socket, std::string_view first_packet) {
+    cast::channel_frame_parser parser;
+    auto appended = parser.append(byte_view(first_packet));
+    if (!appended) {
+        mirage::log::debug("cast channel: rejected frame prefix: {}", appended.error().message);
+        co_return;
+    }
+    log_ready_frames(parser);
+
+    std::array<std::byte, 2048> buffer{};
+    while (socket.is_open()) {
+        auto n = co_await socket.async_read(buffer);
+        if (n == 0) {
+            co_return;
+        }
+        appended = parser.append(std::span<const std::byte>(buffer.data(), n));
+        if (!appended) {
+            mirage::log::debug("cast channel: rejected frame: {}", appended.error().message);
+            co_return;
+        }
+        log_ready_frames(parser);
+    }
+}
+
 io::task<void> handle_cast_connection(io::tcp_stream socket, std::string device_name) {
     std::array<std::byte, 2048> buffer{};
     try {
@@ -54,6 +91,11 @@ io::task<void> handle_cast_connection(io::tcp_stream socket, std::string device_
             case cast::probe_kind::tls_client_hello:
                 mirage::log::debug(
                     "cast probe: cast v2 TLS client connected, media channel is not implemented");
+                break;
+            case cast::probe_kind::channel_frame:
+                mirage::log::debug(
+                    "cast channel: plaintext frame stream connected, message handling is not implemented");
+                co_await handle_cast_channel(socket, data);
                 break;
             case cast::probe_kind::unsupported:
                 mirage::log::debug("cast probe: unsupported first packet");
