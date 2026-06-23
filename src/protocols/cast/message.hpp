@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "core/core.hpp"
+#include "core/receiver_client.hpp"
 
 namespace mirage::protocols::cast {
 
@@ -41,7 +42,9 @@ enum class channel_event : uint8_t {
     default_media_started,
     default_media_stopped,
     volume_updated,
-    media_load_rejected,
+    media_loaded,
+    media_playback_updated,
+    media_stopped,
     media_command_rejected,
 };
 
@@ -53,13 +56,25 @@ struct channel_activity {
 struct channel_message_result {
     std::vector<channel_message> responses;
     channel_activity activity;
+    std::optional<receiver_client_media_status> media_status;
 };
 
 struct channel_session_state {
     bool default_media_running = false;
     double volume_level = 1.0;
     bool volume_muted = false;
-    uint64_t rejected_media_loads = 0;
+    bool media_session_active = false;
+    int64_t media_session_id = 1;
+    double media_current_time = 0.0;
+    double media_duration = 0.0;
+    double media_playback_rate = 1.0;
+    std::string media_player_state = "IDLE";
+    std::string media_content_id;
+    std::string media_content_type;
+    std::string media_title;
+    std::string media_artist;
+    std::string media_album;
+    uint64_t accepted_media_loads = 0;
     uint64_t rejected_media_commands = 0;
     std::string last_media_error;
 };

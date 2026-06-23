@@ -54,7 +54,7 @@ int main() {
             .port = 8009,
             .enabled = true,
             .experimental = true,
-            .detail = "cast v2 control/status receiver",
+            .detail = "cast v2 control/media status receiver",
             .capabilities =
                 {
                     .network_listener = true,

@@ -107,13 +107,29 @@ void publish_cast_activity(receiver_session_observer* observer, uint64_t client_
             }
             mirage::log::diagnostic("Cast control: volume_updated={}", activity.detail);
             break;
-        case cast::channel_event::media_load_rejected:
+        case cast::channel_event::media_loaded:
             if (observer != nullptr && client_status_id != 0) {
                 observer->client_stream_updated(
                     client_status_id,
-                    media_attention_status(std::format("load_failed:{}", activity.detail)));
+                    media_attention_status(std::format("loaded_no_renderer:{}", activity.detail)));
             }
-            mirage::log::diagnostic("Cast media: load_failed={}", activity.detail);
+            mirage::log::diagnostic("Cast media: loaded metadata, renderer=unsupported ({})",
+                                    activity.detail);
+            break;
+        case cast::channel_event::media_playback_updated:
+            if (observer != nullptr && client_status_id != 0) {
+                observer->client_stream_updated(
+                    client_status_id,
+                    media_attention_status(std::format("virtual_playback:{}", activity.detail)));
+            }
+            mirage::log::diagnostic("Cast media: virtual playback command={}", activity.detail);
+            break;
+        case cast::channel_event::media_stopped:
+            if (observer != nullptr && client_status_id != 0) {
+                observer->client_stream_updated(client_status_id,
+                                                control_stream_status("media_stopped"));
+            }
+            mirage::log::diagnostic("Cast media: stopped");
             break;
         case cast::channel_event::media_command_rejected:
             if (observer != nullptr && client_status_id != 0) {
@@ -178,6 +194,9 @@ io::task<void> handle_ready_frames(Stream& socket, cast::channel_frame_parser& p
             }
         }
         publish_cast_activity(observer, client_status_id, result.activity);
+        if (observer != nullptr && client_status_id != 0 && result.media_status) {
+            observer->client_media_updated(client_status_id, std::move(*result.media_status));
+        }
     }
 }
 

@@ -232,19 +232,29 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     sock.sendall(
         cast_message(
             "urn:x-cast:com.google.cast.media",
-            '{"type":"LOAD","requestId":7}',
+            '{"type":"LOAD","requestId":7,'
+            '"media":{"contentId":"https://example.test/song.mp3",'
+            '"contentType":"audio/mpeg","duration":123.4,'
+            '"metadata":{"title":"cast song","artist":"cast artist",'
+            '"albumName":"cast album"}},'
+            '"currentTime":4.5}',
         )
     )
     length = struct.unpack(">I", recv_exact(sock, 4))[0]
     response = recv_exact(sock, length)
-    assert b"LOAD_FAILED" in response
-    assert b'"reason":"MEDIA_NOT_SUPPORTED"' in response
+    assert b"MEDIA_STATUS" in response
+    assert b'"mediaSessionId":1' in response
+    assert b'"playerState":"PLAYING"' in response
+    assert b'"title":"cast song"' in response
     assert b'"requestId":7' in response
     wait_status_contains(
         '"protocol":"cast"',
+        '"media":{"active":true',
+        '"title":"cast song"',
+        '"artist":"cast artist"',
         '"kind":"media"',
         '"health":"attention"',
-        '"reason":"load_failed:MEDIA_NOT_SUPPORTED"',
+        '"reason":"loaded_no_renderer:cast song"',
     )
 
     sock.sendall(
@@ -255,14 +265,14 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     )
     length = struct.unpack(">I", recv_exact(sock, 4))[0]
     response = recv_exact(sock, length)
-    assert b"INVALID_REQUEST" in response
-    assert b'"reason":"INVALID_MEDIA_SESSION_ID"' in response
+    assert b"MEDIA_STATUS" in response
+    assert b'"playerState":"PLAYING"' in response
     assert b'"requestId":8' in response
     wait_status_contains(
         '"protocol":"cast"',
         '"kind":"media"',
         '"health":"attention"',
-        '"reason":"invalid_request:INVALID_MEDIA_SESSION_ID"',
+        '"reason":"virtual_playback:PLAY"',
     )
 
     sock.sendall(
@@ -278,6 +288,7 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     assert b'"requestId":10' in response
     wait_status_contains(
         '"protocol":"cast"',
+        '"media":{"active":false',
         '"kind":"app"',
         '"health":"clean"',
         '"reason":"default_media_stopped"',
@@ -334,7 +345,7 @@ pid=
 grep -q "Cast stream setup: mode=tls_control_status" "${tmpdir}/err"
 grep -q "Cast app: default media receiver running" "${tmpdir}/err"
 grep -q "Cast control: volume_updated=muted" "${tmpdir}/err"
-grep -q "Cast media: load_failed=MEDIA_NOT_SUPPORTED" "${tmpdir}/err"
-grep -q "Cast media: invalid_request=INVALID_MEDIA_SESSION_ID" "${tmpdir}/err"
+grep -q "Cast media: loaded metadata" "${tmpdir}/err"
+grep -q "Cast media: virtual playback command=PLAY" "${tmpdir}/err"
 test -s "${tmpdir}/state/mirage/identity.key"
 grep -Eq '^[A-Za-z0-9+/]{43}=$' "${tmpdir}/state/mirage/identity.key"

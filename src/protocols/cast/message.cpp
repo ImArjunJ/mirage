@@ -383,13 +383,93 @@ std::string launch_error_payload(std::optional<int64_t> request_id, std::string_
                        json_escape(reason), request_id_fragment(request_id));
 }
 
-std::string load_failed_payload(std::optional<int64_t> request_id, std::string_view reason) {
-    return std::format("{{\"type\":\"LOAD_FAILED\",\"reason\":\"{}\"{}}}", json_escape(reason),
-                       request_id_fragment(request_id));
+float cast_volume_db(double level) {
+    const auto clamped = std::clamp(level, 0.0, 1.0);
+    if (clamped <= 0.0) {
+        return -144.0F;
+    }
+    return static_cast<float>(20.0 * std::log10(clamped));
 }
 
-std::string media_status_payload(std::optional<int64_t> request_id) {
-    auto body = std::string("{\"type\":\"MEDIA_STATUS\",\"status\":[]");
+receiver_client_media_status receiver_media_status(const channel_session_state& state) {
+    const auto position_ms = state.media_current_time <= 0.0
+                                 ? 0ULL
+                                 : static_cast<uint64_t>(state.media_current_time * 1000.0);
+    const auto duration_ms = state.media_duration <= 0.0
+                                 ? 0ULL
+                                 : static_cast<uint64_t>(state.media_duration * 1000.0);
+    return {
+        .active = state.media_session_active,
+        .title = state.media_title,
+        .artist = state.media_artist,
+        .album = state.media_album,
+        .artwork_type = {},
+        .artwork_bytes = 0,
+        .position_ms = position_ms,
+        .duration_ms = duration_ms,
+        .volume_db = cast_volume_db(state.volume_level),
+        .volume_linear = static_cast<float>(std::clamp(state.volume_level, 0.0, 1.0)),
+    };
+}
+
+void clear_media_session(channel_session_state& state) {
+    state.media_session_active = false;
+    state.media_current_time = 0.0;
+    state.media_duration = 0.0;
+    state.media_playback_rate = 1.0;
+    state.media_player_state = "IDLE";
+    state.media_content_id.clear();
+    state.media_content_type.clear();
+    state.media_title.clear();
+    state.media_artist.clear();
+    state.media_album.clear();
+}
+
+bool media_session_matches(std::string_view payload, const channel_session_state& state) {
+    auto media_session_id = extract_json_int(payload, "mediaSessionId");
+    return !media_session_id || *media_session_id == state.media_session_id;
+}
+
+std::string media_status_payload(std::optional<int64_t> request_id,
+                                 const channel_session_state& state) {
+    if (!state.media_session_active) {
+        auto body = std::string("{\"type\":\"MEDIA_STATUS\",\"status\":[]");
+        body += request_id_fragment(request_id);
+        body += "}";
+        return body;
+    }
+
+    auto body = std::string("{\"type\":\"MEDIA_STATUS\",\"status\":[{");
+    body += std::format("\"mediaSessionId\":{}", state.media_session_id);
+    body += std::format(",\"playbackRate\":{}", json_number(state.media_playback_rate));
+    body += std::format(",\"playerState\":\"{}\"", json_escape(state.media_player_state));
+    body += std::format(",\"currentTime\":{}", json_number(state.media_current_time));
+    body += ",\"supportedMediaCommands\":15";
+    body += std::format(",\"volume\":{{\"level\":{},\"muted\":{}}}",
+                        json_number(state.volume_level), state.volume_muted ? "true" : "false");
+    body += ",\"media\":{";
+    body += std::format("\"contentId\":\"{}\"", json_escape(state.media_content_id));
+    body += ",\"streamType\":\"BUFFERED\"";
+    body += std::format(",\"contentType\":\"{}\"",
+                        json_escape(state.media_content_type.empty()
+                                        ? std::string_view("application/octet-stream")
+                                        : std::string_view(state.media_content_type)));
+    if (state.media_duration > 0.0) {
+        body += std::format(",\"duration\":{}", json_number(state.media_duration));
+    }
+    body += ",\"metadata\":{";
+    body += "\"metadataType\":0";
+    if (!state.media_title.empty()) {
+        body += std::format(",\"title\":\"{}\"", json_escape(state.media_title));
+    }
+    if (!state.media_artist.empty()) {
+        body += std::format(",\"artist\":\"{}\"", json_escape(state.media_artist));
+    }
+    if (!state.media_album.empty()) {
+        body += std::format(",\"albumName\":\"{}\"", json_escape(state.media_album));
+    }
+    body += "}}";
+    body += "}]";
     body += request_id_fragment(request_id);
     body += "}";
     return body;
@@ -643,6 +723,10 @@ channel_message_result handle_channel_message_result(const channel_message& mess
 
     if (message.namespace_ == namespace_receiver && *type == "STOP") {
         state.default_media_running = false;
+        if (state.media_session_active) {
+            clear_media_session(state);
+            result.media_status = receiver_media_status(state);
+        }
         result.responses.push_back(make_string_message(
             message.source_id, namespace_receiver,
             receiver_status_payload(device_name, extract_json_int(message.payload_utf8,
@@ -662,6 +746,9 @@ channel_message_result handle_channel_message_result(const channel_message& mess
         if (auto muted = extract_json_bool(message.payload_utf8, "muted")) {
             state.volume_muted = *muted;
         }
+        if (state.media_session_active) {
+            result.media_status = receiver_media_status(state);
+        }
         result.responses.push_back(make_string_message(
             message.source_id, namespace_receiver,
             receiver_status_payload(device_name, extract_json_int(message.payload_utf8,
@@ -675,38 +762,89 @@ channel_message_result handle_channel_message_result(const channel_message& mess
     }
 
     if (message.namespace_ == namespace_media && *type == "LOAD") {
-        const auto reason = state.default_media_running ? "MEDIA_NOT_SUPPORTED"
-                                                       : "RECEIVER_APP_NOT_RUNNING";
-        ++state.rejected_media_loads;
-        state.last_media_error = reason;
+        state.default_media_running = true;
+        state.media_session_active = true;
+        state.media_session_id = static_cast<int64_t>(++state.accepted_media_loads);
+        state.media_content_id =
+            extract_json_string(message.payload_utf8, "contentId").value_or("");
+        state.media_content_type =
+            extract_json_string(message.payload_utf8, "contentType").value_or("");
+        state.media_title =
+            extract_json_string(message.payload_utf8, "title").value_or(state.media_content_id);
+        state.media_artist = extract_json_string(message.payload_utf8, "artist")
+                                 .value_or(extract_json_string(message.payload_utf8, "subtitle")
+                                               .value_or(""));
+        state.media_album = extract_json_string(message.payload_utf8, "albumName")
+                                .value_or(extract_json_string(message.payload_utf8, "album")
+                                              .value_or(""));
+        state.media_duration =
+            std::max(0.0, extract_json_double(message.payload_utf8, "duration").value_or(0.0));
+        state.media_current_time =
+            std::max(0.0, extract_json_double(message.payload_utf8, "currentTime").value_or(0.0));
+        state.media_playback_rate = 1.0;
+        const auto autoplay = extract_json_bool(message.payload_utf8, "autoplay").value_or(true);
+        state.media_player_state = autoplay ? "PLAYING" : "PAUSED";
+        state.last_media_error.clear();
         result.responses.push_back(make_string_message(
             message.source_id, namespace_media,
-            load_failed_payload(extract_json_int(message.payload_utf8, "requestId"), reason)));
+            media_status_payload(extract_json_int(message.payload_utf8, "requestId"), state)));
         result.activity = {
-            .event = channel_event::media_load_rejected,
-            .detail = reason,
+            .event = channel_event::media_loaded,
+            .detail = state.media_title.empty() ? state.media_content_id : state.media_title,
         };
+        result.media_status = receiver_media_status(state);
         return result;
     }
 
     if (message.namespace_ == namespace_media && *type == "GET_STATUS") {
         result.responses.push_back(make_string_message(
             message.source_id, namespace_media,
-            media_status_payload(extract_json_int(message.payload_utf8, "requestId"))));
+            media_status_payload(extract_json_int(message.payload_utf8, "requestId"), state)));
         return result;
     }
 
     if (message.namespace_ == namespace_media && *type == "STOP") {
+        clear_media_session(state);
         result.responses.push_back(make_string_message(
             message.source_id, namespace_media,
-            media_status_payload(extract_json_int(message.payload_utf8, "requestId"))));
+            media_status_payload(extract_json_int(message.payload_utf8, "requestId"), state)));
+        result.activity = {
+            .event = channel_event::media_stopped,
+            .detail = "stopped",
+        };
+        result.media_status = receiver_media_status(state);
         return result;
     }
 
-    if (message.namespace_ == namespace_media &&
-        (*type == "PLAY" || *type == "PAUSE" || *type == "SEEK" ||
-         *type == "SET_PLAYBACK_RATE" || *type == "EDIT_TRACKS_INFO")) {
+    if (message.namespace_ == namespace_media && (*type == "PLAY" || *type == "PAUSE" ||
+                                                  *type == "SEEK" ||
+                                                  *type == "SET_PLAYBACK_RATE" ||
+                                                  *type == "EDIT_TRACKS_INFO")) {
         constexpr std::string_view reason = "INVALID_MEDIA_SESSION_ID";
+        if (state.media_session_active && media_session_matches(message.payload_utf8, state)) {
+            if (*type == "PLAY") {
+                state.media_player_state = "PLAYING";
+            } else if (*type == "PAUSE") {
+                state.media_player_state = "PAUSED";
+            } else if (*type == "SEEK") {
+                if (auto current_time = extract_json_double(message.payload_utf8, "currentTime")) {
+                    state.media_current_time = std::max(0.0, *current_time);
+                }
+            } else if (*type == "SET_PLAYBACK_RATE") {
+                if (auto rate = extract_json_double(message.payload_utf8, "playbackRate")) {
+                    state.media_playback_rate = std::max(0.0, *rate);
+                }
+            }
+            result.responses.push_back(make_string_message(
+                message.source_id, namespace_media,
+                media_status_payload(extract_json_int(message.payload_utf8, "requestId"), state)));
+            result.activity = {
+                .event = channel_event::media_playback_updated,
+                .detail = *type,
+            };
+            result.media_status = receiver_media_status(state);
+            return result;
+        }
         ++state.rejected_media_commands;
         state.last_media_error = reason;
         result.responses.push_back(make_string_message(
