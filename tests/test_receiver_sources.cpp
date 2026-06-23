@@ -14,30 +14,36 @@ std::unique_ptr<receiver_session> make_airplay_receiver_session(io::io_context& 
                                                                 receiver_source_descriptor source,
                                                                 crypto::ed25519_keypair keypair,
                                                                 std::string device_name,
-                                                                std::string mac_address) {
+                                                                std::string mac_address,
+                                                                receiver_session_observer* observer) {
     static_cast<void>(ctx);
     static_cast<void>(source);
     static_cast<void>(keypair);
     static_cast<void>(device_name);
     static_cast<void>(mac_address);
+    static_cast<void>(observer);
     return {};
 }
 
 std::unique_ptr<receiver_session> make_cast_receiver_session(io::io_context& ctx,
                                                              receiver_source_descriptor source,
                                                              std::string device_name,
-                                                             protocol_receiver_identity identity) {
+                                                             protocol_receiver_identity identity,
+                                                             receiver_session_observer* observer) {
     static_cast<void>(ctx);
     static_cast<void>(source);
     static_cast<void>(device_name);
     static_cast<void>(identity);
+    static_cast<void>(observer);
     return {};
 }
 
 std::unique_ptr<receiver_session> make_wfd_receiver_session(io::io_context& ctx,
-                                                            receiver_source_descriptor source) {
+                                                            receiver_source_descriptor source,
+                                                            receiver_session_observer* observer) {
     static_cast<void>(ctx);
     static_cast<void>(source);
+    static_cast<void>(observer);
     return {};
 }
 

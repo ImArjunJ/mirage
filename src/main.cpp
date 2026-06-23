@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <csignal>
@@ -6,6 +7,7 @@
 #include <format>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <print>
 #include <span>
 #include <string>
@@ -513,6 +515,78 @@ int handle_status(bool verbose) {
         return {};
     };
 
+    auto extract_array = [&](const std::string& key) -> std::string_view {
+        auto needle = "\"" + key + "\":[";
+        auto pos = json.find(needle);
+        if (pos == std::string::npos) {
+            return {};
+        }
+        auto array_start = pos + needle.size() - 1;
+        size_t depth = 0;
+        bool in_string = false;
+        bool escaped = false;
+        for (size_t scan = array_start; scan < json.size(); ++scan) {
+            char c = json[scan];
+            if (in_string) {
+                if (escaped) {
+                    escaped = false;
+                } else if (c == '\\') {
+                    escaped = true;
+                } else if (c == '"') {
+                    in_string = false;
+                }
+                continue;
+            }
+            if (c == '"') {
+                in_string = true;
+            } else if (c == '[') {
+                ++depth;
+            } else if (c == ']') {
+                --depth;
+                if (depth == 0) {
+                    return std::string_view(json).substr(array_start, scan - array_start + 1);
+                }
+            }
+        }
+        return {};
+    };
+
+    auto extract_objects = [](std::string_view array) -> std::vector<std::string_view> {
+        std::vector<std::string_view> objects;
+        size_t object_start = std::string_view::npos;
+        size_t depth = 0;
+        bool in_string = false;
+        bool escaped = false;
+        for (size_t pos = 0; pos < array.size(); ++pos) {
+            char c = array[pos];
+            if (in_string) {
+                if (escaped) {
+                    escaped = false;
+                } else if (c == '\\') {
+                    escaped = true;
+                } else if (c == '"') {
+                    in_string = false;
+                }
+                continue;
+            }
+            if (c == '"') {
+                in_string = true;
+            } else if (c == '{') {
+                if (depth == 0) {
+                    object_start = pos;
+                }
+                ++depth;
+            } else if (c == '}' && depth > 0) {
+                --depth;
+                if (depth == 0 && object_start != std::string_view::npos) {
+                    objects.push_back(array.substr(object_start, pos - object_start + 1));
+                    object_start = std::string_view::npos;
+                }
+            }
+        }
+        return objects;
+    };
+
     auto capability_summary = [&](std::string_view object) -> std::string {
         std::string summary;
         auto append = [&](const char* key, std::string_view label) {
@@ -540,6 +614,7 @@ int handle_status(bool verbose) {
     auto name = extract_string("name");
     auto ip = extract_string("ip");
     auto iface = extract_string("interface");
+    auto client_objects = extract_objects(extract_array("clients"));
 
     std::println(stderr, "mirage is running (pid {})", *pid);
     if (!name.empty()) {
@@ -551,6 +626,9 @@ int handle_status(bool verbose) {
         } else {
             std::println(stderr, "  ip: {}", ip);
         }
+    }
+    if (!verbose && !client_objects.empty()) {
+        std::println(stderr, "  clients: {}", client_objects.size());
     }
 
     if (verbose) {
@@ -601,6 +679,28 @@ int handle_status(bool verbose) {
             }
             std::println(stderr, "{}", line);
         }
+        std::println(stderr, "  clients:");
+        if (client_objects.empty()) {
+            std::println(stderr, "    none");
+        }
+        for (auto object : client_objects) {
+            auto protocol = extract_string_from(object, "protocol");
+            auto address = extract_string_from(object, "address");
+            auto state = extract_string_from(object, "state");
+            auto client_name = extract_string_from(object, "name");
+
+            std::string line = std::format("    {}", protocol.empty() ? "client" : protocol);
+            if (!address.empty()) {
+                line += std::format(": {}", address);
+            }
+            if (!state.empty()) {
+                line += std::format(", {}", state);
+            }
+            if (!client_name.empty() && client_name != protocol) {
+                line += std::format(", {}", client_name);
+            }
+            std::println(stderr, "{}", line);
+        }
         auto started = extract_int("started");
         if (started) {
             auto now = std::chrono::system_clock::now();
@@ -648,10 +748,10 @@ void remove_pid_file() {
 
 bool write_status_json(int pid, const mirage::config& cfg, const std::string& ip,
                        const std::string& iface_name, const std::filesystem::path& identity_path,
+                       int64_t started,
                        std::span<const mirage::receiver_adapter_status> adapters,
-                       std::span<const mirage::receiver_source_descriptor> sources) {
-    auto now = std::chrono::system_clock::now();
-    auto started = std::chrono::system_clock::to_time_t(now);
+                       std::span<const mirage::receiver_source_descriptor> sources,
+                       std::span<const mirage::receiver_client_status> clients) {
     auto path = status_file_path();
     auto tmp_path = path;
     tmp_path += ".tmp";
@@ -680,6 +780,7 @@ bool write_status_json(int pid, const mirage::config& cfg, const std::string& ip
         .started = started,
         .adapters = adapters,
         .sources = sources,
+        .clients = clients,
     });
     f.close();
     if (!f) {
@@ -702,6 +803,79 @@ bool write_status_json(int pid, const mirage::config& cfg, const std::string& ip
     }
     return true;
 }
+
+class runtime_status_tracker final : public mirage::receiver_session_observer {
+public:
+    runtime_status_tracker(int pid, const mirage::config& cfg, std::string ip,
+                           std::string iface_name, std::filesystem::path identity_path,
+                           int64_t started,
+                           mirage::receiver_adapter_registry& adapters,
+                           std::span<const mirage::receiver_source_descriptor> sources)
+        : pid_(pid),
+          cfg_(cfg),
+          ip_(std::move(ip)),
+          iface_name_(std::move(iface_name)),
+          identity_path_(std::move(identity_path)),
+          started_(started),
+          adapters_(adapters),
+          sources_(sources) {}
+
+    uint64_t client_connected(mirage::receiver_client_status client) override {
+        client.id = next_client_id_++;
+        if (client.name.empty()) {
+            client.name = std::string(mirage::protocol_id(client.protocol_id));
+        }
+        if (client.connected_at == 0) {
+            client.connected_at = std::chrono::system_clock::to_time_t(
+                std::chrono::system_clock::now());
+        }
+
+        clients_.push_back(std::move(client));
+        adapters_.mark_running(clients_.back().protocol_id);
+        write();
+        return clients_.back().id;
+    }
+
+    void client_disconnected(uint64_t client_id) override {
+        auto it = std::ranges::find(clients_, client_id, &mirage::receiver_client_status::id);
+        if (it == clients_.end()) {
+            return;
+        }
+
+        const auto protocol_id = it->protocol_id;
+        clients_.erase(it);
+        if (!has_client(protocol_id)) {
+            if (auto* adapter = adapters_.find(protocol_id);
+                adapter != nullptr && adapter->state == mirage::receiver_adapter_state::running) {
+                adapters_.mark_listening(protocol_id);
+            }
+        }
+        write();
+    }
+
+    bool write() {
+        return write_status_json(pid_, cfg_, ip_, iface_name_, identity_path_, started_,
+                                 adapters_.all(), sources_, clients_);
+    }
+
+private:
+    bool has_client(mirage::protocol protocol_id) const {
+        return std::ranges::any_of(clients_, [&](const auto& client) {
+            return client.protocol_id == protocol_id;
+        });
+    }
+
+    int pid_;
+    const mirage::config& cfg_;
+    std::string ip_;
+    std::string iface_name_;
+    std::filesystem::path identity_path_;
+    int64_t started_ = 0;
+    mirage::receiver_adapter_registry& adapters_;
+    std::span<const mirage::receiver_source_descriptor> sources_;
+    std::vector<mirage::receiver_client_status> clients_;
+    uint64_t next_client_id_ = 1;
+};
 
 void print_receiver_start_error(mirage::protocol id, uint16_t port,
                                 const mirage::mirage_error& error) {
@@ -993,10 +1167,16 @@ int main(int argc, char* argv[]) {
             mirage::log::info("built-in mdns broadcaster enabled");
         }
         std::vector<std::unique_ptr<mirage::receiver_session>> receiver_sessions;
+        const auto started_at =
+            std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+        runtime_status_tracker status_tracker(current_pid(), cfg, local_ip, iface_name,
+                                              receiver_identity_path, started_at, adapters,
+                                              receiver_sources.all());
         const mirage::receiver_source_runtime receiver_runtime{
             .io_context = &ctx,
             .receiver_identity = &*keypair,
             .receiver_public_key = &receiver_public_key,
+            .session_observer = &status_tracker,
             .device_name = cfg.device_name,
             .mac_address = mac_address,
         };
@@ -1029,8 +1209,7 @@ int main(int argc, char* argv[]) {
             mirage::io::co_spawn(ctx, mdns->run());
         }
 
-        write_status_json(current_pid(), cfg, local_ip, iface_name, receiver_identity_path,
-                          adapters.all(), receiver_sources.all());
+        status_tracker.write();
 
         mirage::log::user("mirage started{}",
                           local_ip.empty() ? "" : std::format(" on {}", local_ip));

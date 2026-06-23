@@ -20,18 +20,23 @@ namespace mirage::protocols {
 struct cast_receiver::impl {
     io::tcp_acceptor acceptor;
     std::string device_name;
+    receiver_session_observer* observer = nullptr;
     bool running = false;
-    impl(io::io_context& ctx, uint16_t port, std::string name)
-        : acceptor(io::tcp_acceptor::bind(ctx, port)), device_name(std::move(name)) {}
+    impl(io::io_context& ctx, uint16_t port, std::string name,
+         receiver_session_observer* session_observer)
+        : acceptor(io::tcp_acceptor::bind(ctx, port)),
+          device_name(std::move(name)),
+          observer(session_observer) {}
 };
 cast_receiver::cast_receiver(std::unique_ptr<impl> impl_ptr) : impl_(std::move(impl_ptr)) {}
 cast_receiver::~cast_receiver() = default;
 cast_receiver::cast_receiver(cast_receiver&&) noexcept = default;
 cast_receiver& cast_receiver::operator=(cast_receiver&&) noexcept = default;
 result<cast_receiver> cast_receiver::bind(io::io_context& ctx, uint16_t port,
-                                          std::string device_name) {
+                                          std::string device_name,
+                                          receiver_session_observer* observer) {
     try {
-        auto impl_ptr = std::make_unique<impl>(ctx, port, std::move(device_name));
+        auto impl_ptr = std::make_unique<impl>(ctx, port, std::move(device_name), observer);
         mirage::log::info("cast probe receiver bound to port {}", port);
         return cast_receiver{std::move(impl_ptr)};
     } catch (const std::exception& e) {
@@ -190,6 +195,15 @@ io::task<void> handle_cast_connection(io::tcp_stream socket, std::string device_
     socket.close();
 }
 
+io::task<void> handle_observed_cast_connection(io::tcp_stream socket, std::string device_name,
+                                               receiver_session_observer* observer,
+                                               uint64_t client_status_id) {
+    co_await handle_cast_connection(std::move(socket), std::move(device_name));
+    if (observer != nullptr && client_status_id != 0) {
+        observer->client_disconnected(client_status_id);
+    }
+}
+
 }  // namespace
 
 io::task<void> cast_receiver::run() {
@@ -197,10 +211,22 @@ io::task<void> cast_receiver::run() {
     while (impl_->running) {
         try {
             auto socket = co_await impl_->acceptor.async_accept();
+            uint64_t client_status_id = 0;
+            if (impl_->observer != nullptr) {
+                client_status_id = impl_->observer->client_connected({
+                    .id = 0,
+                    .protocol_id = protocol::cast,
+                    .name = "",
+                    .address = socket.remote_endpoint().addr.to_string(),
+                    .state = "connected",
+                    .connected_at = 0,
+                });
+            }
             mirage::log::info("cast probe connection from {}",
                               socket.remote_endpoint().addr.to_string());
             io::co_spawn(impl_->acceptor.context(),
-                         handle_cast_connection(std::move(socket), impl_->device_name));
+                         handle_observed_cast_connection(std::move(socket), impl_->device_name,
+                                                         impl_->observer, client_status_id));
         } catch (const std::system_error& e) {
             if (impl_->running && e.code() != std::errc::operation_canceled) {
                 mirage::log::warn("cast accept error: {}", e.what());

@@ -11,7 +11,7 @@ result<std::unique_ptr<receiver_session>> create_wfd_session(
     if (runtime.io_context == nullptr) {
         return std::unexpected(mirage_error::session("receiver runtime is missing an event loop"));
     }
-    return make_wfd_receiver_session(*runtime.io_context, source);
+    return make_wfd_receiver_session(*runtime.io_context, source, runtime.session_observer);
 }
 
 }  // namespace

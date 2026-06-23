@@ -49,6 +49,18 @@ grep -q '"advertised":false' "${status_json}"
 
 for ((i = 1; i <= iterations; ++i)); do
     exec 3<>"/dev/tcp/127.0.0.1/${port}"
+    for _ in {1..30}; do
+        if grep -q '"clients":\[{' "${status_json}" &&
+            grep -q '"protocol":"airplay"' "${status_json}" &&
+            grep -q '"address":"127.0.0.1"' "${status_json}"; then
+            break
+        fi
+        sleep 0.1
+    done
+    grep -q '"clients":\[{' "${status_json}"
+    grep -q '"protocol":"airplay"' "${status_json}"
+    grep -q '"address":"127.0.0.1"' "${status_json}"
+
     sdp=$'v=0\r\no=iTunes 1 0 IN IP4 127.0.0.1\r\ns=Mirage Smoke\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio 0 RTP/AVP 96\r\na=rtpmap:96 AppleLossless/44100/2\r\na=fmtp:96 352 0 16 40 10 14 2 255 0 0 44100\r\n'
     printf "ANNOUNCE rtsp://127.0.0.1/stream RTSP/1.0\r\nCSeq: 1\r\nContent-Type: application/sdp\r\nContent-Length: %d\r\n\r\n%s" "${#sdp}" "${sdp}" >&3
     timeout 2 grep -m1 "RTSP/1.0 200 OK" <&3 >/dev/null
@@ -60,6 +72,13 @@ for ((i = 1; i <= iterations; ++i)); do
     timeout 2 grep -m1 "RTSP/1.0 200 OK" <&3 >/dev/null
     exec 3<&-
     exec 3>&-
+    for _ in {1..30}; do
+        if grep -q '"clients":\[\]' "${status_json}"; then
+            break
+        fi
+        sleep 0.1
+    done
+    grep -q '"clients":\[\]' "${status_json}"
 done
 
 kill -INT "${pid}"

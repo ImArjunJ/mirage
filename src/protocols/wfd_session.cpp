@@ -16,16 +16,19 @@
 namespace mirage::protocols {
 struct wfd_session::impl {
     io::tcp_acceptor acceptor;
+    receiver_session_observer* observer = nullptr;
     bool running = false;
-    impl(io::io_context& ctx, uint16_t port) : acceptor(io::tcp_acceptor::bind(ctx, port)) {}
+    impl(io::io_context& ctx, uint16_t port, receiver_session_observer* session_observer)
+        : acceptor(io::tcp_acceptor::bind(ctx, port)), observer(session_observer) {}
 };
 wfd_session::wfd_session(std::unique_ptr<impl> impl_ptr) : impl_(std::move(impl_ptr)) {}
 wfd_session::~wfd_session() = default;
 wfd_session::wfd_session(wfd_session&&) noexcept = default;
 wfd_session& wfd_session::operator=(wfd_session&&) noexcept = default;
-result<wfd_session> wfd_session::bind(io::io_context& ctx, uint16_t port) {
+result<wfd_session> wfd_session::bind(io::io_context& ctx, uint16_t port,
+                                      receiver_session_observer* observer) {
     try {
-        auto impl_ptr = std::make_unique<impl>(ctx, port);
+        auto impl_ptr = std::make_unique<impl>(ctx, port, observer);
         mirage::log::info("WFD (Miracast) capability listener bound to port {}", port);
         return wfd_session{std::move(impl_ptr)};
     } catch (const std::exception& e) {
@@ -97,6 +100,15 @@ io::task<void> handle_wfd_connection(io::tcp_stream socket) {
     }
 }
 
+io::task<void> handle_observed_wfd_connection(io::tcp_stream socket,
+                                              receiver_session_observer* observer,
+                                              uint64_t client_status_id) {
+    co_await handle_wfd_connection(std::move(socket));
+    if (observer != nullptr && client_status_id != 0) {
+        observer->client_disconnected(client_status_id);
+    }
+}
+
 }  // namespace
 
 io::task<void> wfd_session::run() {
@@ -104,8 +116,21 @@ io::task<void> wfd_session::run() {
     while (impl_->running) {
         try {
             auto socket = co_await impl_->acceptor.async_accept();
+            uint64_t client_status_id = 0;
+            if (impl_->observer != nullptr) {
+                client_status_id = impl_->observer->client_connected({
+                    .id = 0,
+                    .protocol_id = protocol::miracast,
+                    .name = "",
+                    .address = socket.remote_endpoint().addr.to_string(),
+                    .state = "connected",
+                    .connected_at = 0,
+                });
+            }
             mirage::log::info("wfd connection from {}", socket.remote_endpoint().addr.to_string());
-            io::co_spawn(impl_->acceptor.context(), handle_wfd_connection(std::move(socket)));
+            io::co_spawn(impl_->acceptor.context(),
+                         handle_observed_wfd_connection(std::move(socket), impl_->observer,
+                                                        client_status_id));
         } catch (const std::system_error& e) {
             if (impl_->running && e.code() != std::errc::operation_canceled) {
                 mirage::log::warn("wfd accept error: {}", e.what());

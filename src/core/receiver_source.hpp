@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "core/core.hpp"
+#include "core/receiver_client.hpp"
 
 namespace mirage {
 
@@ -28,6 +29,7 @@ struct receiver_source_runtime {
     io::io_context* io_context = nullptr;
     const crypto::ed25519_keypair* receiver_identity = nullptr;
     const std::array<std::byte, 32>* receiver_public_key = nullptr;
+    receiver_session_observer* session_observer = nullptr;
     std::string_view device_name;
     std::string_view mac_address;
 };

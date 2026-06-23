@@ -13,11 +13,13 @@ namespace {
 class cast_receiver_session final : public receiver_session {
 public:
     cast_receiver_session(io::io_context& ctx, receiver_source_descriptor source,
-                          std::string device_name, protocol_receiver_identity identity)
+                          std::string device_name, protocol_receiver_identity identity,
+                          receiver_session_observer* observer)
         : ctx_(ctx),
           source_(source),
           device_name_(std::move(device_name)),
-          identity_(std::move(identity)) {}
+          identity_(std::move(identity)),
+          observer_(observer) {}
 
     [[nodiscard]] protocol id() const override { return source_.id; }
     [[nodiscard]] uint16_t port() const override { return source_.port; }
@@ -28,7 +30,7 @@ public:
 
     result<void> start(receiver_adapter_registry& adapters,
                        discovery::service_publisher& publisher) override {
-        auto receiver = cast_receiver::bind(ctx_, source_.port, device_name_);
+        auto receiver = cast_receiver::bind(ctx_, source_.port, device_name_, observer_);
         if (!receiver) {
             adapters.mark_error(id(), receiver.error().message);
             return std::unexpected(receiver.error());
@@ -76,6 +78,7 @@ private:
     receiver_source_descriptor source_;
     std::string device_name_;
     protocol_receiver_identity identity_;
+    receiver_session_observer* observer_ = nullptr;
     std::optional<cast_receiver> receiver_;
 };
 
@@ -84,9 +87,10 @@ private:
 std::unique_ptr<receiver_session> make_cast_receiver_session(io::io_context& ctx,
                                                              receiver_source_descriptor source,
                                                              std::string device_name,
-                                                             protocol_receiver_identity identity) {
+                                                             protocol_receiver_identity identity,
+                                                             receiver_session_observer* observer) {
     return std::make_unique<cast_receiver_session>(ctx, source, std::move(device_name),
-                                                   std::move(identity));
+                                                   std::move(identity), observer);
 }
 
 }  // namespace mirage::protocols

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "core/core.hpp"
+#include "core/receiver_client.hpp"
 #include "core/receiver_source.hpp"
 #include "crypto/crypto.hpp"
 #include "io/io.hpp"
@@ -99,14 +100,15 @@ private:
 class rtsp_server {
 public:
     static result<rtsp_server> bind(io::io_context& ctx, receiver_source_descriptor source,
-                                    crypto::ed25519_keypair keypair);
+                                    crypto::ed25519_keypair keypair,
+                                    receiver_session_observer* observer = nullptr);
     io::task<void> run();
     void stop();
 
 private:
     struct session_store;
     rtsp_server(io::tcp_acceptor acceptor, receiver_source_descriptor source,
-                crypto::ed25519_keypair keypair);
+                crypto::ed25519_keypair keypair, receiver_session_observer* observer);
     io::tcp_acceptor acceptor_;
     receiver_source_descriptor source_;
     crypto::ed25519_keypair keypair_;
@@ -116,7 +118,8 @@ private:
 enum class cast_message_type : uint8_t { connect, close, heartbeat, get_status, launch_app, media };
 class cast_receiver {
 public:
-    static result<cast_receiver> bind(io::io_context& ctx, uint16_t port, std::string device_name);
+    static result<cast_receiver> bind(io::io_context& ctx, uint16_t port, std::string device_name,
+                                      receiver_session_observer* observer = nullptr);
     io::task<void> run();
     void stop();
     ~cast_receiver();
@@ -130,7 +133,8 @@ private:
 };
 class wfd_session {
 public:
-    static result<wfd_session> bind(io::io_context& ctx, uint16_t port);
+    static result<wfd_session> bind(io::io_context& ctx, uint16_t port,
+                                    receiver_session_observer* observer = nullptr);
     io::task<void> run();
     void stop();
     ~wfd_session();

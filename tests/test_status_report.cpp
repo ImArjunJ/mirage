@@ -5,6 +5,7 @@
 #include <string_view>
 
 #include "core/receiver_adapter.hpp"
+#include "core/receiver_client.hpp"
 #include "core/status_report.hpp"
 
 namespace {
@@ -75,6 +76,17 @@ int main() {
     adapters.mark_advertised(mirage::protocol::airplay);
     adapters.mark_error(mirage::protocol::cast, "bind \"failed\"");
 
+    std::array clients{
+        mirage::receiver_client_status{
+            .id = 7,
+            .protocol_id = mirage::protocol::airplay,
+            .name = "Junie",
+            .address = "192.0.2.20",
+            .state = "connected",
+            .connected_at = 123460,
+        },
+    };
+
     const auto json = mirage::render_status_json({
         .pid = 42,
         .name = "Living \"Room\"\n",
@@ -87,6 +99,7 @@ int main() {
         .started = 123456,
         .adapters = adapters.all(),
         .sources = sources,
+        .clients = clients,
     });
 
     ok &= expect(contains(json, "\"pid\":42"), "pid missing");
@@ -110,7 +123,12 @@ int main() {
                  "escaped error detail missing");
     ok &= expect(contains(json, "\"id\":\"miracast\""), "miracast protocol missing");
     ok &= expect(contains(json, "\"state\":\"disabled\""), "disabled state missing");
-    ok &= expect(contains(json, "\"clients\":[]"), "clients list missing");
+    ok &= expect(contains(json, "\"clients\":[{"), "clients list missing");
+    ok &= expect(contains(json, "\"id\":7"), "client id missing");
+    ok &= expect(contains(json, "\"protocol\":\"airplay\""), "client protocol missing");
+    ok &= expect(contains(json, "\"name\":\"Junie\""), "client name missing");
+    ok &= expect(contains(json, "\"address\":\"192.0.2.20\""), "client address missing");
+    ok &= expect(contains(json, "\"connected_at\":123460"), "client connected time missing");
 
     return ok ? 0 : 1;
 }

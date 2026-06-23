@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 
+#include "core/receiver_client.hpp"
 #include "core/receiver_source.hpp"
 
 namespace mirage {
@@ -21,6 +22,7 @@ struct receiver_status_report {
     int64_t started = 0;
     std::span<const receiver_adapter_status> adapters;
     std::span<const receiver_source_descriptor> sources;
+    std::span<const receiver_client_status> clients;
 };
 
 [[nodiscard]] std::string render_status_json(const receiver_status_report& report);

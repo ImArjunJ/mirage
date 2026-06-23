@@ -33,7 +33,8 @@ result<std::unique_ptr<receiver_session>> create_airplay_session(
 
     return make_airplay_receiver_session(*runtime.io_context, source, std::move(*keypair),
                                          std::string(runtime.device_name),
-                                         std::string(runtime.mac_address));
+                                         std::string(runtime.mac_address),
+                                         runtime.session_observer);
 }
 
 }  // namespace

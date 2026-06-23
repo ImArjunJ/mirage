@@ -2162,21 +2162,25 @@ struct rtsp_server::session_store {
     }
 
     std::vector<entry> active;
+    receiver_session_observer* observer = nullptr;
     uint64_t next_id = 1;
     bool stopping = false;
 };
 rtsp_server::rtsp_server(io::tcp_acceptor acceptor, receiver_source_descriptor source,
-                         crypto::ed25519_keypair keypair)
+                         crypto::ed25519_keypair keypair, receiver_session_observer* observer)
     : acceptor_(std::move(acceptor)),
       source_(source),
       keypair_(std::move(keypair)),
-      sessions_(std::make_shared<session_store>()) {}
+      sessions_(std::make_shared<session_store>()) {
+    sessions_->observer = observer;
+}
 auto rtsp_server::bind(io::io_context& ctx, receiver_source_descriptor source,
-                       crypto::ed25519_keypair keypair) -> result<rtsp_server> {
+                       crypto::ed25519_keypair keypair,
+                       receiver_session_observer* observer) -> result<rtsp_server> {
     try {
         auto acceptor = io::tcp_acceptor::bind(ctx, source.port);
         mirage::log::info("RTSP server bound to port {}", source.port);
-        return rtsp_server{std::move(acceptor), source, std::move(keypair)};
+        return rtsp_server{std::move(acceptor), source, std::move(keypair), observer};
     } catch (const std::exception& e) {
         return std::unexpected(
             mirage_error::network(std::format("failed to bind RTSP server: {}", e.what())));
@@ -2194,12 +2198,27 @@ io::task<void> rtsp_server::run() {
                 continue;
             }
             crypto::fairplay_pairing pairing{std::move(*cloned_keypair)};
+            uint64_t client_status_id = 0;
+            if (sessions_->observer != nullptr) {
+                client_status_id = sessions_->observer->client_connected({
+                    .id = 0,
+                    .protocol_id = source_.id,
+                    .name = "",
+                    .address = socket.remote_endpoint().addr.to_string(),
+                    .state = "connected",
+                    .connected_at = 0,
+                });
+            }
             auto session = rtsp_session::create(std::move(socket), std::move(pairing), source_);
             auto sessions = sessions_;
             auto session_id = sessions->add(session);
-            io::co_spawn(acceptor_.context(), [session, sessions, session_id]() -> io::task<void> {
+            io::co_spawn(acceptor_.context(), [session, sessions, session_id,
+                                               client_status_id]() -> io::task<void> {
                 auto result = co_await session->run();
                 sessions->remove(session_id);
+                if (sessions->observer != nullptr && client_status_id != 0) {
+                    sessions->observer->client_disconnected(client_status_id);
+                }
                 if (!result && !sessions->stopping &&
                     session->state() != rtsp_session_state::teardown) {
                     mirage::log::warn("Session ended with error: {}", result.error().message);

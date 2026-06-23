@@ -88,7 +88,22 @@ std::string render_status_json(const receiver_status_report& report) {
         out << "}";
     }
     out << "]";
-    out << ",\"clients\":[]";
+    out << ",\"clients\":[";
+    for (size_t i = 0; i < report.clients.size(); ++i) {
+        const auto& client = report.clients[i];
+        if (i > 0) {
+            out << ",";
+        }
+        out << "{";
+        out << "\"id\":" << client.id;
+        out << ",\"protocol\":\"" << protocol_id(client.protocol_id) << "\"";
+        out << ",\"name\":\"" << json_escape(client.name) << "\"";
+        out << ",\"address\":\"" << json_escape(client.address) << "\"";
+        out << ",\"state\":\"" << json_escape(client.state) << "\"";
+        out << ",\"connected_at\":" << client.connected_at;
+        out << "}";
+    }
+    out << "]";
     out << "}";
     return out.str();
 }

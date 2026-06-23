@@ -19,7 +19,7 @@ result<std::unique_ptr<receiver_session>> create_cast_session(
     }
     auto identity = derive_protocol_identity(*runtime.receiver_public_key, "cast-v2");
     return make_cast_receiver_session(*runtime.io_context, source, std::string(runtime.device_name),
-                                      std::move(identity));
+                                      std::move(identity), runtime.session_observer);
 }
 
 }  // namespace
