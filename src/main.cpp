@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <array>
 #include <chrono>
 #include <csignal>
@@ -27,6 +26,7 @@
 #include "core/log.hpp"
 #include "core/receiver_adapter.hpp"
 #include "core/receiver_session.hpp"
+#include "core/status_report.hpp"
 #include "crypto/crypto.hpp"
 #include "discovery/discovery.hpp"
 #include "io/event_loop.hpp"
@@ -144,38 +144,6 @@ std::filesystem::path pid_file_path() {
 
 std::filesystem::path status_file_path() {
     return state_dir() / "status.json";
-}
-
-std::string json_escape(std::string_view value) {
-    std::string out;
-    out.reserve(value.size() + 8);
-    for (char c : value) {
-        switch (c) {
-            case '\\':
-                out += "\\\\";
-                break;
-            case '"':
-                out += "\\\"";
-                break;
-            case '\n':
-                out += "\\n";
-                break;
-            case '\r':
-                out += "\\r";
-                break;
-            case '\t':
-                out += "\\t";
-                break;
-            default:
-                out.push_back(c);
-                break;
-        }
-    }
-    return out;
-}
-
-std::string json_bool(bool value) {
-    return value ? "true" : "false";
 }
 
 std::filesystem::path identity_key_path(const mirage::config& cfg) {
@@ -302,6 +270,14 @@ bool is_process_running(pid_t pid) {
     return kill(pid, 0) == 0;
 }
 #endif
+
+bool pid_is_running(int pid) {
+#ifdef _WIN32
+    return is_process_running(pid);
+#else
+    return is_process_running(static_cast<pid_t>(pid));
+#endif
+}
 
 #ifdef _WIN32
 int handle_stop() {
@@ -508,7 +484,7 @@ int handle_status(bool verbose) {
 
     auto is_default_protocol_detail = [](std::string_view detail) {
         return detail == "disabled by config" || detail == "rtsp/raop receiver" ||
-               detail == "cast v2 receiver" || detail == "wfd receiver";
+               detail == "cast v2 probe receiver" || detail == "wfd stub (not listening)";
     };
 
     auto name = extract_string("name");
@@ -552,17 +528,18 @@ int handle_status(bool verbose) {
             auto detail = extract_string_from(object, "detail");
             auto transport = extract_string_from(object, "transport");
             auto caps = capability_summary(object);
+            const bool disabled = state == "disabled";
             std::string line = std::format("    {}: {}", id, state.empty() ? "unknown" : state);
             if (port && *port > 0) {
                 line += std::format(", port {}", *port);
             }
-            if (!transport.empty()) {
+            if (!disabled && !transport.empty()) {
                 line += std::format(", transport {}", transport);
             }
-            if (!caps.empty()) {
+            if (!disabled && !caps.empty()) {
                 line += std::format(", {}", caps);
             }
-            if (advertised && *advertised) {
+            if (!disabled && advertised && *advertised) {
                 line += ", advertised";
             }
             if (!detail.empty() && !is_default_protocol_detail(detail)) {
@@ -611,51 +588,20 @@ void write_status_json(int pid, const mirage::config& cfg, const std::string& ip
     auto now = std::chrono::system_clock::now();
     auto started = std::chrono::system_clock::to_time_t(now);
     auto path = status_file_path();
+    auto identity_key = identity_path.string();
     std::ofstream f(path);
-    f << "{";
-    f << "\"pid\":" << pid;
-    f << ",\"name\":\"" << json_escape(cfg.device_name) << "\"";
-    f << ",\"ip\":\"" << json_escape(ip) << "\"";
-    f << ",\"interface\":\"" << json_escape(iface_name) << "\"";
-    f << ",\"identity_key\":\"" << json_escape(identity_path.string()) << "\"";
-    f << ",\"airplay_port\":" << cfg.airplay_port;
-    f << ",\"cast_port\":" << cfg.cast_port;
-    f << ",\"started\":" << started;
-    f << ",\"protocols\":[";
-    for (size_t i = 0; i < adapters.size(); ++i) {
-        const auto& adapter = adapters[i];
-        if (i > 0) {
-            f << ",";
-        }
-        f << "{";
-        f << "\"id\":\"" << mirage::protocol_id(adapter.id) << "\"";
-        f << ",\"name\":\"" << mirage::to_string(adapter.id) << "\"";
-        f << ",\"state\":\"" << mirage::to_string(adapter.state) << "\"";
-        f << ",\"port\":" << adapter.port;
-        f << ",\"advertised\":" << json_bool(adapter.advertised);
-        f << ",\"experimental\":" << json_bool(adapter.experimental);
-        f << ",\"detail\":\"" << json_escape(adapter.detail) << "\"";
-        const auto source =
-            std::ranges::find(sources, adapter.id, &mirage::receiver_source_descriptor::id);
-        if (source != sources.end()) {
-            const auto& caps = source->capabilities;
-            f << ",\"transport\":\"" << json_escape(caps.transport) << "\"";
-            f << ",\"capabilities\":{";
-            f << "\"network_listener\":" << json_bool(caps.network_listener);
-            f << ",\"discovery\":" << json_bool(caps.discovery);
-            f << ",\"pairing\":" << json_bool(caps.pairing);
-            f << ",\"media_setup\":" << json_bool(caps.media_setup);
-            f << ",\"audio\":" << json_bool(caps.audio);
-            f << ",\"video\":" << json_bool(caps.video);
-            f << ",\"remote_control\":" << json_bool(caps.remote_control);
-            f << ",\"metadata\":" << json_bool(caps.metadata);
-            f << "}";
-        }
-        f << "}";
-    }
-    f << "]";
-    f << ",\"clients\":[]";
-    f << "}";
+    f << mirage::render_status_json({
+        .pid = pid,
+        .name = cfg.device_name,
+        .ip = ip,
+        .interface_name = iface_name,
+        .identity_key = identity_key,
+        .airplay_port = cfg.airplay_port,
+        .cast_port = cfg.cast_port,
+        .started = started,
+        .adapters = adapters,
+        .sources = sources,
+    });
 }
 
 void print_receiver_start_error(mirage::protocol id, uint16_t port,
@@ -862,6 +808,17 @@ int main(int argc, char* argv[]) {
 #endif
         setup_logging(verbose, debug, trace, diagnostics);
     }
+    bool owns_runtime_files = daemon_mode;
+    if (!daemon_mode) {
+        auto pid = read_pid_file();
+        if (pid && pid_is_running(*pid)) {
+            std::println(stderr, "mirage is already running (pid {}).", *pid);
+            return 1;
+        }
+        remove_pid_file();
+        write_pid_file(current_pid());
+        owns_runtime_files = true;
+    }
 
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
@@ -873,6 +830,9 @@ int main(int argc, char* argv[]) {
             std::println(stderr, "crypto error: could not load or generate receiver identity.");
             std::println(stderr, "  {}", keypair.error().message);
             std::println(stderr, "  this is unusual -- check that openssl is installed correctly.");
+            if (owns_runtime_files) {
+                remove_pid_file();
+            }
             return 1;
         }
         auto receiver_public_key = keypair->public_key();
@@ -880,6 +840,9 @@ int main(int argc, char* argv[]) {
         if (!interfaces) {
             std::println(stderr, "no network interfaces found.");
             std::println(stderr, "  make sure wifi or ethernet is connected and up.");
+            if (owns_runtime_files) {
+                remove_pid_file();
+            }
             return 1;
         }
         std::string mac_address = "AA:BB:CC:DD:EE:FF";
@@ -951,10 +914,8 @@ int main(int argc, char* argv[]) {
             mirage::io::co_spawn(ctx, mdns->run());
         }
 
-        if (daemon_mode) {
-            write_status_json(current_pid(), cfg, local_ip, iface_name, receiver_identity_path,
-                              adapters.all(), receiver_sources.all());
-        }
+        write_status_json(current_pid(), cfg, local_ip, iface_name, receiver_identity_path,
+                          adapters.all(), receiver_sources.all());
 
         mirage::log::user("mirage started{}",
                           local_ip.empty() ? "" : std::format(" on {}", local_ip));
@@ -986,12 +947,12 @@ int main(int argc, char* argv[]) {
         ctx.stop();
     } catch (const std::exception& e) {
         mirage::log::error("fatal: {}", e.what());
-        if (daemon_mode) {
+        if (owns_runtime_files) {
             remove_pid_file();
         }
         return 1;
     }
-    if (daemon_mode) {
+    if (owns_runtime_files) {
         remove_pid_file();
     }
     mirage::log::info("stopped");

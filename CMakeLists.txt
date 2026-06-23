@@ -101,6 +101,7 @@ add_executable(mirage
     src/core/receiver_identity.cpp
     src/core/receiver_adapter.cpp
     src/core/receiver_source.cpp
+    src/core/status_report.cpp
     src/crypto/fairplay_pairing.cpp
     src/crypto/fairplay_sap.cpp
     src/crypto/srp6a.cpp
@@ -224,6 +225,16 @@ if(BUILD_TESTING)
     target_compile_options(mirage_receiver_adapter_test PRIVATE ${MIRAGE_CXX_FLAGS})
     target_link_options(mirage_receiver_adapter_test PRIVATE ${MIRAGE_LINK_FLAGS})
     add_test(NAME receiver_adapter COMMAND mirage_receiver_adapter_test)
+
+    add_executable(mirage_status_report_test
+        tests/test_status_report.cpp
+        src/core/receiver_adapter.cpp
+        src/core/status_report.cpp
+    )
+    target_include_directories(mirage_status_report_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_options(mirage_status_report_test PRIVATE ${MIRAGE_CXX_FLAGS})
+    target_link_options(mirage_status_report_test PRIVATE ${MIRAGE_LINK_FLAGS})
+    add_test(NAME status_report COMMAND mirage_status_report_test)
 
     add_executable(mirage_receiver_sources_test
         tests/test_receiver_sources.cpp

@@ -1,0 +1,95 @@
+#include "core/status_report.hpp"
+
+#include <algorithm>
+#include <sstream>
+#include <string>
+
+#include "core/core.hpp"
+
+namespace mirage {
+namespace {
+
+std::string json_escape(std::string_view value) {
+    std::string out;
+    out.reserve(value.size() + 8);
+    for (char c : value) {
+        switch (c) {
+            case '\\':
+                out += "\\\\";
+                break;
+            case '"':
+                out += "\\\"";
+                break;
+            case '\n':
+                out += "\\n";
+                break;
+            case '\r':
+                out += "\\r";
+                break;
+            case '\t':
+                out += "\\t";
+                break;
+            default:
+                out.push_back(c);
+                break;
+        }
+    }
+    return out;
+}
+
+std::string_view json_bool(bool value) {
+    return value ? "true" : "false";
+}
+
+}  // namespace
+
+std::string render_status_json(const receiver_status_report& report) {
+    std::ostringstream out;
+    out << "{";
+    out << "\"pid\":" << report.pid;
+    out << ",\"name\":\"" << json_escape(report.name) << "\"";
+    out << ",\"ip\":\"" << json_escape(report.ip) << "\"";
+    out << ",\"interface\":\"" << json_escape(report.interface_name) << "\"";
+    out << ",\"identity_key\":\"" << json_escape(report.identity_key) << "\"";
+    out << ",\"airplay_port\":" << report.airplay_port;
+    out << ",\"cast_port\":" << report.cast_port;
+    out << ",\"started\":" << report.started;
+    out << ",\"protocols\":[";
+    for (size_t i = 0; i < report.adapters.size(); ++i) {
+        const auto& adapter = report.adapters[i];
+        if (i > 0) {
+            out << ",";
+        }
+        out << "{";
+        out << "\"id\":\"" << protocol_id(adapter.id) << "\"";
+        out << ",\"name\":\"" << to_string(adapter.id) << "\"";
+        out << ",\"state\":\"" << to_string(adapter.state) << "\"";
+        out << ",\"port\":" << adapter.port;
+        out << ",\"advertised\":" << json_bool(adapter.advertised);
+        out << ",\"experimental\":" << json_bool(adapter.experimental);
+        out << ",\"detail\":\"" << json_escape(adapter.detail) << "\"";
+        const auto source =
+            std::ranges::find(report.sources, adapter.id, &receiver_source_descriptor::id);
+        if (source != report.sources.end()) {
+            const auto& caps = source->capabilities;
+            out << ",\"transport\":\"" << json_escape(caps.transport) << "\"";
+            out << ",\"capabilities\":{";
+            out << "\"network_listener\":" << json_bool(caps.network_listener);
+            out << ",\"discovery\":" << json_bool(caps.discovery);
+            out << ",\"pairing\":" << json_bool(caps.pairing);
+            out << ",\"media_setup\":" << json_bool(caps.media_setup);
+            out << ",\"audio\":" << json_bool(caps.audio);
+            out << ",\"video\":" << json_bool(caps.video);
+            out << ",\"remote_control\":" << json_bool(caps.remote_control);
+            out << ",\"metadata\":" << json_bool(caps.metadata);
+            out << "}";
+        }
+        out << "}";
+    }
+    out << "]";
+    out << ",\"clients\":[]";
+    out << "}";
+    return out.str();
+}
+
+}  // namespace mirage

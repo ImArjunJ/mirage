@@ -34,7 +34,21 @@ XDG_CONFIG_HOME="${tmpdir}/config" XDG_STATE_HOME="${tmpdir}/state" \
     "${mirage_bin}" --no-mdns --no-airplay --cast --cast-port "${port}" --diagnostics \
     >"${tmpdir}/out" 2>"${tmpdir}/err" &
 pid=$!
-sleep 1
+
+status_json="${tmpdir}/state/mirage/status.json"
+for _ in {1..30}; do
+    if [[ -s "${status_json}" ]]; then
+        break
+    fi
+    sleep 0.1
+done
+test -s "${status_json}"
+grep -q '"id":"cast"' "${status_json}"
+grep -q '"state":"listening"' "${status_json}"
+grep -q '"transport":"cast-v2"' "${status_json}"
+grep -q '"advertised":false' "${status_json}"
+grep -q '"id":"airplay"' "${status_json}"
+grep -q '"state":"disabled"' "${status_json}"
 
 exec 3<>"/dev/tcp/127.0.0.1/${port}"
 printf "GET /setup/eureka_info HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n" >&3
