@@ -1,0 +1,42 @@
+#include <memory>
+
+#include "protocols/receiver_sessions.hpp"
+#include "protocols/receiver_sources.hpp"
+
+namespace mirage::protocols {
+namespace {
+
+result<std::unique_ptr<receiver_session>> create_wfd_session(
+    const receiver_source_descriptor& source, const receiver_source_runtime& runtime) {
+    if (runtime.io_context == nullptr) {
+        return std::unexpected(mirage_error::session("receiver runtime is missing an event loop"));
+    }
+    return make_wfd_receiver_session(*runtime.io_context, source);
+}
+
+}  // namespace
+
+receiver_source_descriptor make_wfd_receiver_source(const config& cfg) {
+    return {
+        .id = protocol::miracast,
+        .port = cfg.miracast_port,
+        .enabled = cfg.enable_miracast,
+        .experimental = true,
+        .detail = "wfd receiver",
+        .capabilities =
+            {
+                .network_listener = false,
+                .discovery = false,
+                .pairing = true,
+                .media_setup = true,
+                .audio = true,
+                .video = true,
+                .remote_control = true,
+                .metadata = false,
+                .transport = "wfd",
+            },
+        .session_factory = create_wfd_session,
+    };
+}
+
+}  // namespace mirage::protocols

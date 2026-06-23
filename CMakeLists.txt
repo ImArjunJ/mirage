@@ -117,10 +117,13 @@ add_executable(mirage
     src/protocols/rtsp_server.cpp
     src/protocols/cast_channel.cpp
     src/protocols/wfd_session.cpp
-    src/protocols/receiver_sessions.cpp
+    src/protocols/receiver_sources.cpp
+    src/protocols/airplay/source.cpp
     src/protocols/airplay/media_source.cpp
     src/protocols/airplay/receiver_session.cpp
+    src/protocols/cast/source.cpp
     src/protocols/cast/receiver_session.cpp
+    src/protocols/wfd/source.cpp
     src/protocols/wfd/receiver_session.cpp
     src/io/tcp.cpp
     src/io/udp.cpp

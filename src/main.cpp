@@ -30,7 +30,7 @@
 #include "crypto/crypto.hpp"
 #include "discovery/discovery.hpp"
 #include "io/event_loop.hpp"
-#include "protocols/receiver_sessions.hpp"
+#include "protocols/receiver_sources.hpp"
 namespace {
 volatile std::sig_atomic_t signal_received = 0;
 void signal_handler(int signal) {
