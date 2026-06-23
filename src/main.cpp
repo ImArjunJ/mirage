@@ -31,6 +31,7 @@
 #include "core/receiver_adapter.hpp"
 #include "core/receiver_session.hpp"
 #include "core/runtime_paths.hpp"
+#include "core/runtime_process.hpp"
 #include "core/status_report.hpp"
 #include "crypto/crypto.hpp"
 #include "discovery/discovery.hpp"
@@ -478,133 +479,47 @@ int handle_doctor(int argc, char* argv[]) {
     return ok ? 0 : 1;
 }
 
-std::optional<int> read_pid_file() {
-    std::ifstream f(pid_file_path());
-    if (!f.is_open()) {
-        return std::nullopt;
-    }
-    int pid = 0;
-    f >> pid;
-    if (pid <= 0) {
-        return std::nullopt;
-    }
-    return pid;
-}
+void clear_runtime_files();
 
-#ifdef _WIN32
-bool is_process_running(int pid) {
-    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(pid));
-    if (!h) {
-        return false;
-    }
-    DWORD exit_code = 0;
-    GetExitCodeProcess(h, &exit_code);
-    CloseHandle(h);
-    return exit_code == STILL_ACTIVE;
-}
-#else
-bool is_process_running(pid_t pid) {
-    return kill(pid, 0) == 0;
-}
-#endif
-
-bool pid_is_running(int pid) {
-#ifdef _WIN32
-    return is_process_running(pid);
-#else
-    return is_process_running(static_cast<pid_t>(pid));
-#endif
-}
-
-#ifdef _WIN32
 int handle_stop() {
-    auto pid = read_pid_file();
-    if (!pid || !is_process_running(*pid)) {
+    auto status = mirage::read_runtime_pid_status(pid_file_path(), mirage::is_process_running);
+    if (status.state != mirage::runtime_pid_state::running || !status.pid) {
+        clear_runtime_files();
         std::println(stderr, "mirage is not running.");
         return 1;
     }
-    HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, static_cast<DWORD>(*pid));
-    if (h) {
-        TerminateProcess(h, 0);
-        CloseHandle(h);
-    }
-    for (int i = 0; i < 30; ++i) {
-        Sleep(100);
-        if (!is_process_running(*pid)) {
-            std::println(stderr, "mirage stopped.");
-            return 0;
-        }
-    }
-    std::println(stderr, "mirage did not stop within 3 seconds (pid {}).", *pid);
-    return 1;
-}
-#else
-int handle_stop() {
-    auto pid = read_pid_file();
-    if (!pid || !is_process_running(static_cast<pid_t>(*pid))) {
-        std::println(stderr, "mirage is not running.");
+
+    if (!mirage::request_process_stop(*status.pid)) {
+        std::println(stderr, "could not stop mirage (pid {}).", *status.pid);
         return 1;
     }
-    kill(static_cast<pid_t>(*pid), SIGTERM);
-    for (int i = 0; i < 30; ++i) {
-        usleep(100'000);
-        if (!is_process_running(static_cast<pid_t>(*pid))) {
-            std::println(stderr, "mirage stopped.");
-            return 0;
-        }
+    if (mirage::wait_for_process_exit(*status.pid, std::chrono::seconds(3))) {
+        mirage::remove_runtime_files(pid_file_path(), status_file_path());
+        std::println(stderr, "mirage stopped.");
+        return 0;
     }
-    std::println(stderr, "mirage did not stop within 3 seconds (pid {}).", *pid);
+    std::println(stderr, "mirage did not stop within 3 seconds (pid {}).", *status.pid);
     return 1;
 }
-#endif
 
 int handle_status(bool verbose) {
-    auto pid = read_pid_file();
-    if (!pid || !is_process_running(
-#ifdef _WIN32
-                    *pid
-#else
-                    static_cast<pid_t>(*pid)
-#endif
-                    )) {
+    auto status = mirage::read_runtime_pid_status(pid_file_path(), mirage::is_process_running);
+    if (status.state != mirage::runtime_pid_state::running || !status.pid) {
+        clear_runtime_files();
         std::println(stderr, "mirage is not running.");
         return 0;
     }
     auto path = status_file_path();
     std::ifstream f(path);
     if (!f.is_open()) {
-        std::println(stderr, "mirage is running (pid {})", *pid);
+        std::println(stderr, "mirage is running (pid {})", *status.pid);
         return 0;
     }
     std::string json((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
 
     auto summary = mirage::parse_status_summary(json);
-    std::print(stderr, "{}", mirage::render_status_summary_text(summary, *pid, verbose));
+    std::print(stderr, "{}", mirage::render_status_summary_text(summary, *status.pid, verbose));
     return 0;
-}
-
-bool write_pid_file(int pid) {
-    auto dir = state_dir();
-    std::error_code ec;
-    std::filesystem::create_directories(dir, ec);
-    if (ec) {
-        std::println(stderr, "could not create state directory: {}", ec.message());
-        return false;
-    }
-    auto path = pid_file_path();
-    std::ofstream f(path, std::ios::trunc);
-    if (!f) {
-        std::println(stderr, "could not write pid file: {}", path.string());
-        return false;
-    }
-    f << pid;
-    return true;
-}
-
-void remove_pid_file() {
-    std::error_code ec;
-    std::filesystem::remove(pid_file_path(), ec);
-    std::filesystem::remove(status_file_path(), ec);
 }
 
 bool write_status_json(int pid, const mirage::config& cfg, const std::string& ip,
@@ -791,25 +706,56 @@ void print_receiver_start_error(mirage::protocol id, uint16_t port,
     }
 }
 
-int current_pid() {
-#ifdef _WIN32
-    return static_cast<int>(GetCurrentProcessId());
-#else
-    return static_cast<int>(getpid());
-#endif
+bool write_runtime_pid_or_report(int pid) {
+    std::string error;
+    if (mirage::write_runtime_pid_file(pid_file_path(), pid, &error)) {
+        return true;
+    }
+    std::println(stderr, "could not write pid file: {}{}", pid_file_path().string(),
+                 error.empty() ? "" : std::format(" ({})", error));
+    return false;
+}
+
+void clear_runtime_files() {
+    mirage::remove_runtime_files(pid_file_path(), status_file_path());
+}
+
+bool claim_runtime_for_process(int pid) {
+    auto claim = mirage::claim_runtime_files(pid_file_path(), status_file_path(), pid,
+                                             mirage::is_process_running);
+    if (claim.claimed) {
+        return true;
+    }
+    if (claim.existing.state == mirage::runtime_pid_state::running && claim.existing.pid) {
+        std::println(stderr, "mirage is already running (pid {}).", *claim.existing.pid);
+    } else {
+        std::println(stderr, "could not write pid file: {}{}", pid_file_path().string(),
+                     claim.error.empty() ? "" : std::format(" ({})", claim.error));
+    }
+    return false;
+}
+
+bool clear_stale_runtime_before_daemon() {
+    auto status = mirage::read_runtime_pid_status(pid_file_path(), mirage::is_process_running);
+    if (status.state == mirage::runtime_pid_state::running && status.pid) {
+        std::println(stderr, "mirage is already running (pid {}).", *status.pid);
+        return false;
+    }
+    if (status.state != mirage::runtime_pid_state::running) {
+        clear_runtime_files();
+    }
+    return true;
 }
 
 #ifdef _WIN32
 bool daemonize() {
-    auto pid = read_pid_file();
-    if (pid && is_process_running(*pid)) {
-        std::println(stderr, "mirage is already running (pid {}).", *pid);
+    if (!clear_stale_runtime_before_daemon()) {
         return false;
     }
     auto dir = state_dir();
     std::filesystem::create_directories(dir);
     FreeConsole();
-    if (!write_pid_file(current_pid())) {
+    if (!write_runtime_pid_or_report(mirage::current_process_id())) {
         return false;
     }
 
@@ -817,14 +763,13 @@ bool daemonize() {
     FILE* log_file = nullptr;
     _wfreopen_s(&log_file, log_path.c_str(), L"a", stderr);
 
-    std::println(stderr, "mirage started as background process (pid {})", current_pid());
+    std::println(stderr, "mirage started as background process (pid {})",
+                 mirage::current_process_id());
     return true;
 }
 #else
 bool daemonize(pid_t& child_pid) {
-    auto pid = read_pid_file();
-    if (pid && is_process_running(static_cast<pid_t>(*pid))) {
-        std::println(stderr, "mirage is already running (pid {}).", *pid);
+    if (!clear_stale_runtime_before_daemon()) {
         return false;
     }
 
@@ -837,7 +782,7 @@ bool daemonize(pid_t& child_pid) {
         return false;
     }
     if (child_pid > 0) {
-        if (!write_pid_file(static_cast<int>(child_pid))) {
+        if (!write_runtime_pid_or_report(static_cast<int>(child_pid))) {
             _exit(1);
         }
         std::println(stderr, "mirage started (pid {})", child_pid);
@@ -863,7 +808,7 @@ bool daemonize(pid_t& child_pid) {
         close(log_fd);
     }
 
-    if (!write_pid_file(current_pid())) {
+    if (!write_runtime_pid_or_report(mirage::current_process_id())) {
         return false;
     }
     return true;
@@ -1016,13 +961,7 @@ int main(int argc, char* argv[]) {
     }
     bool owns_runtime_files = daemon_mode;
     if (!daemon_mode) {
-        auto pid = read_pid_file();
-        if (pid && pid_is_running(*pid)) {
-            std::println(stderr, "mirage is already running (pid {}).", *pid);
-            return 1;
-        }
-        remove_pid_file();
-        if (!write_pid_file(current_pid())) {
+        if (!claim_runtime_for_process(mirage::current_process_id())) {
             return 1;
         }
         owns_runtime_files = true;
@@ -1039,7 +978,7 @@ int main(int argc, char* argv[]) {
             std::println(stderr, "  {}", keypair.error().message);
             std::println(stderr, "  this is unusual -- check that openssl is installed correctly.");
             if (owns_runtime_files) {
-                remove_pid_file();
+                clear_runtime_files();
             }
             return 1;
         }
@@ -1049,7 +988,7 @@ int main(int argc, char* argv[]) {
             std::println(stderr, "no network interfaces found.");
             std::println(stderr, "  make sure wifi or ethernet is connected and up.");
             if (owns_runtime_files) {
-                remove_pid_file();
+                clear_runtime_files();
             }
             return 1;
         }
@@ -1088,9 +1027,9 @@ int main(int argc, char* argv[]) {
         std::vector<std::unique_ptr<mirage::receiver_session>> receiver_sessions;
         const auto started_at =
             std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-        runtime_status_tracker status_tracker(current_pid(), cfg, local_ip, iface_name,
-                                              receiver_identity_path, started_at, adapters,
-                                              receiver_sources.all());
+        runtime_status_tracker status_tracker(mirage::current_process_id(), cfg, local_ip,
+                                              iface_name, receiver_identity_path, started_at,
+                                              adapters, receiver_sources.all());
         const mirage::receiver_source_runtime receiver_runtime{
             .io_context = &ctx,
             .receiver_identity = &*keypair,
@@ -1142,7 +1081,7 @@ int main(int argc, char* argv[]) {
             drain_shutdown_work(ctx);
             ctx.stop();
             if (owns_runtime_files) {
-                remove_pid_file();
+                clear_runtime_files();
             }
             return 1;
         }
@@ -1187,12 +1126,12 @@ int main(int argc, char* argv[]) {
     } catch (const std::exception& e) {
         mirage::log::error("fatal: {}", e.what());
         if (owns_runtime_files) {
-            remove_pid_file();
+            clear_runtime_files();
         }
         return 1;
     }
     if (owns_runtime_files) {
-        remove_pid_file();
+        clear_runtime_files();
     }
     mirage::log::info("stopped");
     return 0;
