@@ -32,6 +32,7 @@ struct audio_receive_result {
 };
 
 struct audio_source_stats {
+    uint64_t received_packets = 0;
     uint64_t decoded_packets = 0;
     uint64_t silent_or_marker = 0;
     uint64_t gaps = 0;
@@ -53,6 +54,9 @@ struct video_source_config {
 struct video_source_stats {
     uint64_t frames = 0;
     uint64_t keyframes = 0;
+    uint64_t decrypted_frames = 0;
+    uint64_t decrypt_failures = 0;
+    uint64_t decode_failures = 0;
 };
 
 class media_source {

@@ -1648,6 +1648,9 @@ io::task<void> rtsp_session::run_mirror_receiver() {
             log_receiver_video_summary(source_, {
                                                     .frames = stats.frames,
                                                     .keyframes = stats.keyframes,
+                                                    .decrypted_frames = stats.decrypted_frames,
+                                                    .decrypt_failures = stats.decrypt_failures,
+                                                    .decode_failures = stats.decode_failures,
                                                 });
             if (!airplay_media_.video_open()) {
                 mirage::log::info("Window closed, tearing down session");
@@ -1730,6 +1733,7 @@ io::task<void> rtsp_session::run_audio_receiver() {
     media_sink_->on_audio_teardown();
     auto stats = airplay_media_.audio_stats();
     log_receiver_audio_summary(source_, {
+                                            .received_packets = stats.received_packets,
                                             .decoded_packets = stats.decoded_packets,
                                             .silent_or_marker = stats.silent_or_marker,
                                             .gaps = stats.gaps,

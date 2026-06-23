@@ -162,6 +162,7 @@ audio_receive_result media_source::receive_audio_rtp(std::span<const std::byte> 
     if (rtp_packet.size() <= media::rtp_header::size) {
         return receive_result;
     }
+    ++audio_stats_.received_packets;
 
     auto seqnum =
         static_cast<uint16_t>((static_cast<uint16_t>(static_cast<uint8_t>(rtp_packet[2])) << 8) |
@@ -474,8 +475,10 @@ result<void> media_source::process_video_frame(uint8_t payload_flag,
     std::vector<std::byte> decrypted(payload.size());
     auto result = video_decryptor_->decrypt(payload, decrypted);
     if (!result) {
+        ++video_stats_.decrypt_failures;
         return std::unexpected(result.error());
     }
+    ++video_stats_.decrypted_frames;
     if (video_stats_.frames <= 3) {
         log::trace("Frame {} decrypted {} bytes", video_stats_.frames, payload.size());
     }
@@ -543,8 +546,11 @@ result<void> media_source::process_video_frame(uint8_t payload_flag,
         .retransmitted = false,
     };
     auto decode_result = sink_.on_video_packet(packet);
-    if (!decode_result && video_stats_.frames % 60 == 1) {
-        log::debug("Decode: {}", decode_result.error().message);
+    if (!decode_result) {
+        ++video_stats_.decode_failures;
+        if (video_stats_.decode_failures <= 5 || video_stats_.frames % 60 == 1) {
+            log::debug("Decode: {}", decode_result.error().message);
+        }
     }
     return {};
 }

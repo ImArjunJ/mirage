@@ -158,6 +158,47 @@ int main() {
     ok &= expect(!wfd->capabilities.discovery, "miracast discovery capability mismatch");
     ok &= expect_no_media_capabilities(*wfd, "wfd");
 
+    ok &= expect(mirage::classify_audio_stream({}) == mirage::receiver_stream_health::clean,
+                 "idle audio health mismatch");
+    ok &= expect(mirage::audio_stream_health_reason({}) == "no_audio_packets",
+                 "idle audio reason mismatch");
+    ok &= expect(mirage::classify_audio_stream({
+                     .received_packets = 8,
+                     .decoded_packets = 0,
+                     .silent_or_marker = 0,
+                 }) == mirage::receiver_stream_health::attention,
+                 "undecoded audio health mismatch");
+    ok &= expect(mirage::audio_stream_health_reason({
+                     .received_packets = 8,
+                     .decoded_packets = 0,
+                     .silent_or_marker = 0,
+                 }) == "no_decoded_audio",
+                 "undecoded audio reason mismatch");
+    ok &= expect(mirage::classify_audio_stream({
+                     .received_packets = 16,
+                     .decoded_packets = 8,
+                     .silent_or_marker = 0,
+                     .stale_or_redundant = 100,
+                 }) == mirage::receiver_stream_health::clean,
+                 "redundant audio health mismatch");
+    ok &= expect(mirage::classify_video_stream({
+                     .frames = 120,
+                     .keyframes = 1,
+                     .decrypted_frames = 119,
+                 }) == mirage::receiver_stream_health::clean,
+                 "clean video health mismatch");
+    ok &= expect(mirage::video_stream_health_reason({
+                     .frames = 120,
+                     .keyframes = 0,
+                 }) == "no_keyframes",
+                 "video keyframe reason mismatch");
+    ok &= expect(mirage::classify_video_stream({
+                     .frames = 120,
+                     .keyframes = 1,
+                     .decrypt_failures = 1,
+                 }) == mirage::receiver_stream_health::attention,
+                 "video decrypt failure health mismatch");
+
     mirage::config custom;
     custom.enable_cast = true;
     custom.enable_miracast = true;

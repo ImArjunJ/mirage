@@ -87,6 +87,7 @@ struct receiver_audio_stream_setup {
 };
 
 struct receiver_audio_stream_summary {
+    uint64_t received_packets = 0;
     uint64_t decoded_packets = 0;
     uint64_t silent_or_marker = 0;
     uint64_t gaps = 0;
@@ -100,11 +101,18 @@ struct receiver_audio_stream_summary {
 struct receiver_video_stream_summary {
     uint64_t frames = 0;
     uint64_t keyframes = 0;
+    uint64_t decrypted_frames = 0;
+    uint64_t decrypt_failures = 0;
+    uint64_t decode_failures = 0;
 };
 
 [[nodiscard]] receiver_stream_health classify_audio_stream(
     const receiver_audio_stream_summary& summary);
 [[nodiscard]] receiver_stream_health classify_video_stream(
+    const receiver_video_stream_summary& summary);
+[[nodiscard]] std::string_view audio_stream_health_reason(
+    const receiver_audio_stream_summary& summary);
+[[nodiscard]] std::string_view video_stream_health_reason(
     const receiver_video_stream_summary& summary);
 
 void log_receiver_audio_setup(const receiver_source_descriptor& source,

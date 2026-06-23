@@ -142,6 +142,7 @@ int main() {
     ok &= expect(sink.audio_packets.size() == 3, "invalid packet was delivered");
 
     auto stats = source.audio_stats();
+    ok &= expect(stats.received_packets == 7, "received count mismatch");
     ok &= expect(stats.decoded_packets == 3, "decoded count mismatch");
     ok &= expect(stats.gaps == 1, "gap count mismatch");
     ok &= expect(stats.resend_requests == 1, "resend count mismatch");
@@ -175,6 +176,8 @@ int main() {
     ok &= expect(video_frame.has_value(), "video frame handling failed");
     ok &= expect(source.video_stats().frames == 1, "video frame count mismatch");
     ok &= expect(source.video_stats().keyframes == 1, "video keyframe count mismatch");
+    ok &= expect(source.video_stats().decrypted_frames == 0, "video decrypted count mismatch");
+    ok &= expect(source.video_stats().decrypt_failures == 0, "video decrypt failure mismatch");
     ok &= expect(sink.video_packets.empty(), "encrypted video packet was emitted without keys");
 
     source.stop_video();

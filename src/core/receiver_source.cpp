@@ -40,18 +40,53 @@ result<std::unique_ptr<receiver_session>> receiver_source_descriptor::create_ses
 }
 
 receiver_stream_health classify_audio_stream(const receiver_audio_stream_summary& summary) {
-    if (summary.gaps == 0 && summary.resend_requests == 0 && summary.invalid == 0 &&
-        summary.pending == 0) {
+    if (audio_stream_health_reason(summary) == "ok" ||
+        audio_stream_health_reason(summary) == "no_audio_packets") {
         return receiver_stream_health::clean;
     }
     return receiver_stream_health::attention;
 }
 
 receiver_stream_health classify_video_stream(const receiver_video_stream_summary& summary) {
-    if (summary.frames > 0 && summary.keyframes > 0) {
+    if (video_stream_health_reason(summary) == "ok") {
         return receiver_stream_health::clean;
     }
     return receiver_stream_health::attention;
+}
+
+std::string_view audio_stream_health_reason(const receiver_audio_stream_summary& summary) {
+    if (summary.invalid > 0) {
+        return "invalid_packets";
+    }
+    if (summary.gaps > 0 || summary.resend_requests > 0) {
+        return "packet_loss";
+    }
+    if (summary.pending > 0) {
+        return "pending_packets";
+    }
+    if (summary.received_packets == 0) {
+        return "no_audio_packets";
+    }
+    if (summary.decoded_packets == 0 && summary.silent_or_marker == 0) {
+        return "no_decoded_audio";
+    }
+    return "ok";
+}
+
+std::string_view video_stream_health_reason(const receiver_video_stream_summary& summary) {
+    if (summary.decrypt_failures > 0) {
+        return "decrypt_failures";
+    }
+    if (summary.decode_failures > 0) {
+        return "decode_failures";
+    }
+    if (summary.frames == 0) {
+        return "no_video_frames";
+    }
+    if (summary.keyframes == 0) {
+        return "no_keyframes";
+    }
+    return "ok";
 }
 
 void log_receiver_audio_setup(const receiver_source_descriptor& source,
@@ -78,19 +113,21 @@ void log_receiver_audio_summary(const receiver_source_descriptor& source,
     log::diagnostic(
         "Audio stream summary: health={}, decoded_packets={}, silent_or_marker={}, gaps={}, "
         "resend_requests={}, stale_or_redundant={}, duplicates={}, invalid={}, pending={}, "
-        "source={}, transport={}",
+        "received_packets={}, reason={}, source={}, transport={}",
         to_string(classify_audio_stream(summary)), summary.decoded_packets,
         summary.silent_or_marker, summary.gaps, summary.resend_requests, summary.stale_or_redundant,
-        summary.duplicates, summary.invalid, summary.pending, protocol_id(source.id),
-        source.capabilities.transport);
+        summary.duplicates, summary.invalid, summary.pending, summary.received_packets,
+        audio_stream_health_reason(summary), protocol_id(source.id), source.capabilities.transport);
 }
 
 void log_receiver_video_summary(const receiver_source_descriptor& source,
                                 const receiver_video_stream_summary& summary) {
     log::diagnostic(
-        "Video stream summary: health={}, frames={}, keyframes={}, source={}, transport={}",
+        "Video stream summary: health={}, frames={}, keyframes={}, decrypted_frames={}, "
+        "decrypt_failures={}, decode_failures={}, reason={}, source={}, transport={}",
         to_string(classify_video_stream(summary)), summary.frames, summary.keyframes,
-        protocol_id(source.id), source.capabilities.transport);
+        summary.decrypted_frames, summary.decrypt_failures, summary.decode_failures,
+        video_stream_health_reason(summary), protocol_id(source.id), source.capabilities.transport);
 }
 
 receiver_source_registry::receiver_source_registry(std::vector<receiver_source_descriptor> sources)

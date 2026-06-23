@@ -286,6 +286,7 @@ if(BUILD_TESTING)
     add_executable(mirage_receiver_sources_test
         tests/test_receiver_sources.cpp
         src/protocols/receiver_sources.cpp
+        src/core/receiver_source.cpp
         src/core/receiver_identity.cpp
         src/protocols/airplay/source.cpp
         src/protocols/cast/source.cpp
