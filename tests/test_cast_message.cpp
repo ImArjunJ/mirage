@@ -426,6 +426,11 @@ int main() {
         ok &= expect(media_pause_result.activity.event == channel_event::media_playback_updated,
                      "media pause activity mismatch");
         ok &= expect(state.media_player_state == "PAUSED", "media pause state mismatch");
+        ok &= expect(media_pause_result.media_control.has_value(), "media pause control missing");
+        if (media_pause_result.media_control) {
+            ok &= expect(media_pause_result.media_control->kind == channel_media_control_kind::pause,
+                         "media pause control kind mismatch");
+        }
     }
 
     channel_message media_seek{
@@ -451,6 +456,67 @@ int main() {
         if (media_seek_result.media_status) {
             ok &= expect(media_seek_result.media_status->position_ms == 40000,
                          "media seek status position mismatch");
+        }
+        ok &= expect(media_seek_result.media_control.has_value(), "media seek control missing");
+        if (media_seek_result.media_control) {
+            ok &= expect(media_seek_result.media_control->kind == channel_media_control_kind::seek,
+                         "media seek control kind mismatch");
+            ok &= expect(media_seek_result.media_control->position == 40.0,
+                         "media seek control position mismatch");
+        }
+    }
+
+    channel_message media_play{
+        .protocol_version = 0,
+        .source_id = "sender-9",
+        .destination_id = "receiver-0",
+        .namespace_ = std::string(namespace_media),
+        .payload_type = channel_payload_type::string_payload,
+        .payload_utf8 = "{\"type\":\"PLAY\",\"requestId\":26,\"mediaSessionId\":1}",
+        .payload_binary = {},
+    };
+    auto media_play_result = handle_channel_message_result(media_play, "Living Room", state);
+    auto& media_play_response = media_play_result.responses;
+    ok &= expect(media_play_response.size() == 1, "media play response count mismatch");
+    if (!media_play_response.empty()) {
+        ok &= expect(contains(media_play_response.front().payload_utf8, "\"playerState\":\"PLAYING\""),
+                     "media play state mismatch");
+        ok &= expect(contains(media_play_response.front().payload_utf8, "\"requestId\":26"),
+                     "media play request id mismatch");
+        ok &= expect(media_play_result.media_control.has_value(), "media play control missing");
+        if (media_play_result.media_control) {
+            ok &= expect(media_play_result.media_control->kind == channel_media_control_kind::play,
+                         "media play control kind mismatch");
+        }
+        ok &= expect(state.media_player_state == "PLAYING", "media play state mismatch");
+    }
+
+    channel_message media_rate{
+        .protocol_version = 0,
+        .source_id = "sender-9",
+        .destination_id = "receiver-0",
+        .namespace_ = std::string(namespace_media),
+        .payload_type = channel_payload_type::string_payload,
+        .payload_utf8 =
+            "{\"type\":\"SET_PLAYBACK_RATE\",\"requestId\":27,\"mediaSessionId\":1,"
+            "\"playbackRate\":1.5}",
+        .payload_binary = {},
+    };
+    auto media_rate_result = handle_channel_message_result(media_rate, "Living Room", state);
+    auto& media_rate_response = media_rate_result.responses;
+    ok &= expect(media_rate_response.size() == 1, "media rate response count mismatch");
+    if (!media_rate_response.empty()) {
+        ok &= expect(contains(media_rate_response.front().payload_utf8, "\"playbackRate\":1.5"),
+                     "media rate response mismatch");
+        ok &= expect(contains(media_rate_response.front().payload_utf8, "\"requestId\":27"),
+                     "media rate request id mismatch");
+        ok &= expect(media_rate_result.media_control.has_value(), "media rate control missing");
+        if (media_rate_result.media_control) {
+            ok &= expect(media_rate_result.media_control->kind ==
+                             channel_media_control_kind::set_playback_rate,
+                         "media rate control kind mismatch");
+            ok &= expect(media_rate_result.media_control->playback_rate == 1.5,
+                         "media rate control value mismatch");
         }
     }
 

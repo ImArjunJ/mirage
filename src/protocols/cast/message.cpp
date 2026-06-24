@@ -933,16 +933,36 @@ channel_message_result handle_channel_message_result(const channel_message& mess
         if (state.media_session_active && media_session_matches(message.payload_utf8, state)) {
             if (*type == "PLAY") {
                 state.media_player_state = "PLAYING";
+                result.media_control = channel_media_control{
+                    .kind = channel_media_control_kind::play,
+                    .position = state.media_current_time,
+                    .playback_rate = state.media_playback_rate,
+                };
             } else if (*type == "PAUSE") {
                 state.media_player_state = "PAUSED";
+                result.media_control = channel_media_control{
+                    .kind = channel_media_control_kind::pause,
+                    .position = state.media_current_time,
+                    .playback_rate = state.media_playback_rate,
+                };
             } else if (*type == "SEEK") {
                 if (auto current_time = extract_json_double(message.payload_utf8, "currentTime")) {
                     state.media_current_time = std::max(0.0, *current_time);
                 }
+                result.media_control = channel_media_control{
+                    .kind = channel_media_control_kind::seek,
+                    .position = state.media_current_time,
+                    .playback_rate = state.media_playback_rate,
+                };
             } else if (*type == "SET_PLAYBACK_RATE") {
                 if (auto rate = extract_json_double(message.payload_utf8, "playbackRate")) {
                     state.media_playback_rate = std::max(0.0, *rate);
                 }
+                result.media_control = channel_media_control{
+                    .kind = channel_media_control_kind::set_playback_rate,
+                    .position = state.media_current_time,
+                    .playback_rate = state.media_playback_rate,
+                };
             }
             result.responses.push_back(make_string_message(
                 message.source_id, namespace_media,

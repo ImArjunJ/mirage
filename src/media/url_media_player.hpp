@@ -35,6 +35,10 @@ public:
 
     void load(remote_media_load request);
     void stop();
+    void play();
+    void pause();
+    void seek(double seconds);
+    void set_playback_rate(double rate);
     void set_volume(float db, float linear);
 
     [[nodiscard]] remote_media_playback_status status() const;

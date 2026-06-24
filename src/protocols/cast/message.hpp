@@ -67,11 +67,25 @@ struct channel_media_load {
     bool autoplay = true;
 };
 
+enum class channel_media_control_kind : uint8_t {
+    play,
+    pause,
+    seek,
+    set_playback_rate,
+};
+
+struct channel_media_control {
+    channel_media_control_kind kind = channel_media_control_kind::play;
+    double position = 0.0;
+    double playback_rate = 1.0;
+};
+
 struct channel_message_result {
     std::vector<channel_message> responses;
     channel_activity activity;
     std::optional<receiver_client_media_status> media_status;
     std::optional<channel_media_load> media_load;
+    std::optional<channel_media_control> media_control;
 };
 
 struct channel_session_state {

@@ -3,10 +3,12 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <thread>
@@ -212,9 +214,15 @@ int interrupt_callback(void* opaque) {
 struct url_media_player::impl {
     std::thread worker;
     std::atomic_bool stop_requested{false};
+    std::atomic_bool paused{false};
 
     mutable std::mutex status_mutex;
     remote_media_playback_status playback_status;
+
+    std::mutex command_mutex;
+    bool seek_requested = false;
+    double seek_seconds = 0.0;
+    double playback_rate = 1.0;
 
     std::mutex player_mutex;
     audio::audio_player* audio_player = nullptr;
@@ -224,6 +232,42 @@ struct url_media_player::impl {
     void update_status(remote_media_playback_status status) {
         std::scoped_lock lock(status_mutex);
         playback_status = std::move(status);
+    }
+
+    void update_detail(std::string detail) {
+        std::scoped_lock lock(status_mutex);
+        playback_status.detail = std::move(detail);
+    }
+
+    void set_paused(bool value) {
+        paused.store(value, std::memory_order_relaxed);
+        update_detail(value ? "paused" : "playing");
+    }
+
+    void request_seek(double seconds) {
+        {
+            std::scoped_lock lock(command_mutex);
+            seek_requested = true;
+            seek_seconds = std::max(0.0, seconds);
+        }
+        update_detail("seeking");
+    }
+
+    std::optional<double> take_seek_request() {
+        std::scoped_lock lock(command_mutex);
+        if (!seek_requested) {
+            return std::nullopt;
+        }
+        seek_requested = false;
+        return seek_seconds;
+    }
+
+    void set_rate(double rate) {
+        {
+            std::scoped_lock lock(command_mutex);
+            playback_rate = std::max(0.0, rate);
+        }
+        update_detail("playback_rate");
     }
 
     void set_audio_player(audio::audio_player* player) {
@@ -331,6 +375,13 @@ void decode_video_packet(AVCodecContext& ctx, AVFrame& frame, const AVPacket& pa
 
 void url_media_player::impl::run(remote_media_load request) {
     avformat_network_init();
+    paused.store(!request.autoplay, std::memory_order_relaxed);
+    {
+        std::scoped_lock lock(command_mutex);
+        seek_requested = false;
+        seek_seconds = std::max(0.0, request.start_time);
+        playback_rate = 1.0;
+    }
     update_status({
         .active = true,
         .audio = false,
@@ -412,11 +463,6 @@ void url_media_player::impl::run(remote_media_load request) {
     log::diagnostic("Cast media renderer started: url={}, audio={}, video={}", request.url,
                     audio_ready ? "true" : "false", video_ready ? "true" : "false");
 
-    if (!request.autoplay) {
-        set_audio_player(nullptr);
-        return;
-    }
-
     if (request.start_time > 0.0) {
         const auto timestamp = static_cast<int64_t>(request.start_time * AV_TIME_BASE);
         av_seek_frame(format.get(), -1, timestamp, AVSEEK_FLAG_BACKWARD);
@@ -433,6 +479,30 @@ void url_media_player::impl::run(remote_media_load request) {
     }
 
     while (!stop_requested.load(std::memory_order_relaxed)) {
+        if (auto seek = take_seek_request()) {
+            const auto timestamp = static_cast<int64_t>(*seek * AV_TIME_BASE);
+            ret = av_seek_frame(format.get(), -1, timestamp, AVSEEK_FLAG_BACKWARD);
+            if (ret < 0) {
+                log::warn("Cast media seek failed for {}: {}", request.url, av_error_string(ret));
+            } else {
+                if (audio_ctx) {
+                    avcodec_flush_buffers(audio_ctx.get());
+                }
+                if (video_ctx) {
+                    avcodec_flush_buffers(video_ctx.get());
+                }
+                update_status({.active = true, .audio = audio_ready, .video = video_ready,
+                               .detail = paused.load(std::memory_order_relaxed) ? "paused"
+                                                                                 : "playing"});
+                log::diagnostic("Cast media renderer seek: url={}, position={}", request.url,
+                                *seek);
+            }
+        }
+        if (paused.load(std::memory_order_relaxed)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
+
         ret = av_read_frame(format.get(), packet.get());
         if (ret < 0) {
             break;
@@ -478,11 +548,28 @@ void url_media_player::load(remote_media_load request) {
 
 void url_media_player::stop() {
     impl_->stop_requested.store(true, std::memory_order_relaxed);
+    impl_->paused.store(false, std::memory_order_relaxed);
     impl_->set_audio_player(nullptr);
     if (impl_->worker.joinable()) {
         impl_->worker.join();
     }
     impl_->update_status({.active = false, .detail = "stopped"});
+}
+
+void url_media_player::play() {
+    impl_->set_paused(false);
+}
+
+void url_media_player::pause() {
+    impl_->set_paused(true);
+}
+
+void url_media_player::seek(double seconds) {
+    impl_->request_seek(seconds);
+}
+
+void url_media_player::set_playback_rate(double rate) {
+    impl_->set_rate(rate);
 }
 
 void url_media_player::set_volume(float db, float linear) {

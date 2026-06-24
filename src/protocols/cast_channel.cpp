@@ -148,9 +148,10 @@ void publish_cast_activity(receiver_session_observer* observer, uint64_t client_
             if (observer != nullptr && client_status_id != 0) {
                 observer->client_stream_updated(
                     client_status_id,
-                    media_attention_status(std::format("virtual_playback:{}", activity.detail)));
+                    media_attention_status(std::format("renderer_playback:{}", activity.detail)));
             }
-            mirage::log::diagnostic("Cast media: virtual playback command={}", activity.detail);
+            mirage::log::diagnostic("Cast media: renderer playback command={}",
+                                    activity.detail);
             break;
         case cast::channel_event::media_stopped:
             if (observer != nullptr && client_status_id != 0) {
@@ -245,6 +246,22 @@ io::task<void> handle_ready_frames(Stream& socket, cast::channel_frame_parser& p
             (result.activity.event == cast::channel_event::media_stopped ||
              result.activity.event == cast::channel_event::default_media_stopped)) {
             media_player->stop();
+        }
+        if (media_player != nullptr && result.media_control) {
+            switch (result.media_control->kind) {
+                case cast::channel_media_control_kind::play:
+                    media_player->play();
+                    break;
+                case cast::channel_media_control_kind::pause:
+                    media_player->pause();
+                    break;
+                case cast::channel_media_control_kind::seek:
+                    media_player->seek(result.media_control->position);
+                    break;
+                case cast::channel_media_control_kind::set_playback_rate:
+                    media_player->set_playback_rate(result.media_control->playback_rate);
+                    break;
+            }
         }
         if (media_player != nullptr &&
             result.activity.event == cast::channel_event::volume_updated && result.media_status) {
