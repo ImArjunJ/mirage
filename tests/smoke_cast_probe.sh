@@ -232,20 +232,38 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
 
     sock.sendall(
         cast_message(
+            "urn:x-cast:com.google.cast.receiver",
+            '{"type":"GET_CAST_STATE","requestId":6}',
+        )
+    )
+    length = struct.unpack(">I", recv_exact(sock, 4))[0]
+    response = recv_exact(sock, length)
+    assert b"INVALID_REQUEST" in response
+    assert b'"reason":"INVALID_COMMAND"' in response
+    assert b'"requestId":6' in response
+    wait_status_contains(
+        '"protocol":"cast"',
+        '"kind":"control"',
+        '"health":"attention"',
+        '"reason":"invalid_request:INVALID_COMMAND"',
+    )
+
+    sock.sendall(
+        cast_message(
             "urn:x-cast:com.google.cast.media",
-            '{"type":"GET_STATUS","requestId":6}',
+            '{"type":"GET_STATUS","requestId":7}',
         )
     )
     length = struct.unpack(">I", recv_exact(sock, 4))[0]
     response = recv_exact(sock, length)
     assert b"MEDIA_STATUS" in response
     assert b'"status":[]' in response
-    assert b'"requestId":6' in response
+    assert b'"requestId":7' in response
 
     sock.sendall(
         cast_message(
             "urn:x-cast:com.google.cast.media",
-            '{"type":"LOAD","requestId":7,'
+            '{"type":"LOAD","requestId":8,'
             '"media":{"contentId":"https://example.test/song.mp3",'
             '"contentType":"audio/mpeg","duration":123.4,'
             '"metadata":{"title":"cast song","artist":"cast artist",'
@@ -259,7 +277,7 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     assert b'"mediaSessionId":1' in response
     assert b'"playerState":"PLAYING"' in response
     assert b'"title":"cast song"' in response
-    assert b'"requestId":7' in response
+    assert b'"requestId":8' in response
     wait_status_contains(
         '"protocol":"cast"',
         '"media":{"active":true',
@@ -273,14 +291,14 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     sock.sendall(
         cast_message(
             "urn:x-cast:com.google.cast.media",
-            '{"type":"PLAY","requestId":8,"mediaSessionId":1}',
+            '{"type":"PLAY","requestId":9,"mediaSessionId":1}',
         )
     )
     length = struct.unpack(">I", recv_exact(sock, 4))[0]
     response = recv_exact(sock, length)
     assert b"MEDIA_STATUS" in response
     assert b'"playerState":"PLAYING"' in response
-    assert b'"requestId":8' in response
+    assert b'"requestId":9' in response
     wait_status_contains(
         '"protocol":"cast"',
         '"kind":"media"',
@@ -291,14 +309,32 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     sock.sendall(
         cast_message(
             "urn:x-cast:com.google.cast.media",
-            '{"type":"STOP","requestId":9,"mediaSessionId":999}',
+            '{"type":"QUEUE_UPDATE","requestId":10,"mediaSessionId":1}',
+        )
+    )
+    length = struct.unpack(">I", recv_exact(sock, 4))[0]
+    response = recv_exact(sock, length)
+    assert b"INVALID_REQUEST" in response
+    assert b'"reason":"INVALID_COMMAND"' in response
+    assert b'"requestId":10' in response
+    wait_status_contains(
+        '"protocol":"cast"',
+        '"kind":"media"',
+        '"health":"attention"',
+        '"reason":"invalid_request:INVALID_COMMAND"',
+    )
+
+    sock.sendall(
+        cast_message(
+            "urn:x-cast:com.google.cast.media",
+            '{"type":"STOP","requestId":11,"mediaSessionId":999}',
         )
     )
     length = struct.unpack(">I", recv_exact(sock, 4))[0]
     response = recv_exact(sock, length)
     assert b"INVALID_REQUEST" in response
     assert b'"reason":"INVALID_MEDIA_SESSION_ID"' in response
-    assert b'"requestId":9' in response
+    assert b'"requestId":11' in response
     wait_status_contains(
         '"protocol":"cast"',
         '"kind":"media"',
@@ -309,14 +345,14 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     sock.sendall(
         cast_message(
             "urn:x-cast:com.google.cast.media",
-            '{"type":"STOP","requestId":10,"mediaSessionId":1}',
+            '{"type":"STOP","requestId":12,"mediaSessionId":1}',
         )
     )
     length = struct.unpack(">I", recv_exact(sock, 4))[0]
     response = recv_exact(sock, length)
     assert b"MEDIA_STATUS" in response
     assert b'"status":[]' in response
-    assert b'"requestId":10' in response
+    assert b'"requestId":12' in response
     wait_status_contains(
         '"protocol":"cast"',
         '"kind":"control"',
@@ -327,14 +363,14 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     sock.sendall(
         cast_message(
             "urn:x-cast:com.google.cast.receiver",
-            '{"type":"STOP","requestId":11,"sessionId":"default-media-session"}',
+            '{"type":"STOP","requestId":13,"sessionId":"default-media-session"}',
         )
     )
     length = struct.unpack(">I", recv_exact(sock, 4))[0]
     response = recv_exact(sock, length)
     assert b"RECEIVER_STATUS" in response
     assert b'"applications":[]' in response
-    assert b'"requestId":11' in response
+    assert b'"requestId":13' in response
     wait_status_contains(
         '"protocol":"cast"',
         '"media":{"active":false',
@@ -394,7 +430,9 @@ pid=
 grep -q "Cast stream setup: mode=tls_control_status" "${tmpdir}/err"
 grep -q "Cast app: default media receiver running" "${tmpdir}/err"
 grep -q "Cast control: volume_updated=muted" "${tmpdir}/err"
+grep -q "Cast control: invalid_request=INVALID_COMMAND" "${tmpdir}/err"
 grep -q "Cast media: loaded metadata" "${tmpdir}/err"
 grep -q "Cast media: virtual playback command=PLAY" "${tmpdir}/err"
+grep -q "Cast media: invalid_request=INVALID_COMMAND" "${tmpdir}/err"
 test -s "${tmpdir}/state/mirage/identity.key"
 grep -Eq '^[A-Za-z0-9+/]{43}=$' "${tmpdir}/state/mirage/identity.key"

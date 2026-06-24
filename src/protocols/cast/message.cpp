@@ -480,10 +480,19 @@ std::string media_status_payload(std::optional<int64_t> request_id,
     return body;
 }
 
-std::string media_invalid_request_payload(std::optional<int64_t> request_id,
-                                          std::string_view reason) {
+std::string invalid_request_payload(std::optional<int64_t> request_id, std::string_view reason) {
     return std::format("{{\"type\":\"INVALID_REQUEST\",\"reason\":\"{}\"{}}}", json_escape(reason),
                        request_id_fragment(request_id));
+}
+
+void reject_receiver_command(channel_message_result& result, std::string_view destination_id,
+                             std::optional<int64_t> request_id, std::string_view reason) {
+    result.responses.push_back(make_string_message(destination_id, namespace_receiver,
+                                                   invalid_request_payload(request_id, reason)));
+    result.activity = {
+        .event = channel_event::receiver_command_rejected,
+        .detail = std::string(reason),
+    };
 }
 
 void reject_media_command(channel_message_result& result, channel_session_state& state,
@@ -491,8 +500,8 @@ void reject_media_command(channel_message_result& result, channel_session_state&
                           std::string_view reason) {
     ++state.rejected_media_commands;
     state.last_media_error = reason;
-    result.responses.push_back(make_string_message(
-        destination_id, namespace_media, media_invalid_request_payload(request_id, reason)));
+    result.responses.push_back(make_string_message(destination_id, namespace_media,
+                                                   invalid_request_payload(request_id, reason)));
     result.activity = {
         .event = channel_event::media_command_rejected,
         .detail = std::string(reason),
@@ -782,6 +791,13 @@ channel_message_result handle_channel_message_result(const channel_message& mess
         return result;
     }
 
+    if (message.namespace_ == namespace_receiver) {
+        reject_receiver_command(result, message.source_id,
+                                extract_json_int(message.payload_utf8, "requestId"),
+                                "INVALID_COMMAND");
+        return result;
+    }
+
     if (message.namespace_ == namespace_media && *type == "LOAD") {
         state.default_media_running = true;
         state.media_session_active = true;
@@ -873,6 +889,13 @@ channel_message_result handle_channel_message_result(const channel_message& mess
         }
         reject_media_command(result, state, message.source_id,
                              extract_json_int(message.payload_utf8, "requestId"), reason);
+        return result;
+    }
+
+    if (message.namespace_ == namespace_media) {
+        reject_media_command(result, state, message.source_id,
+                             extract_json_int(message.payload_utf8, "requestId"),
+                             "INVALID_COMMAND");
         return result;
     }
 

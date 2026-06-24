@@ -45,6 +45,7 @@ enum class channel_event : uint8_t {
     media_loaded,
     media_playback_updated,
     media_stopped,
+    receiver_command_rejected,
     media_command_rejected,
 };
 

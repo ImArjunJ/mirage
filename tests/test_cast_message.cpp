@@ -232,6 +232,39 @@ int main() {
         ok &= expect(state.volume_muted, "set volume muted state mismatch");
     }
 
+    channel_message unsupported_receiver{
+        .protocol_version = 0,
+        .source_id = "sender-5",
+        .destination_id = "receiver-0",
+        .namespace_ = std::string(namespace_receiver),
+        .payload_type = channel_payload_type::string_payload,
+        .payload_utf8 = "{\"type\":\"GET_CAST_STATE\",\"requestId\":21}",
+        .payload_binary = {},
+    };
+    auto unsupported_receiver_result =
+        handle_channel_message_result(unsupported_receiver, "Living Room", state);
+    auto& unsupported_receiver_response = unsupported_receiver_result.responses;
+    ok &= expect(unsupported_receiver_response.size() == 1,
+                 "unsupported receiver response count mismatch");
+    if (!unsupported_receiver_response.empty()) {
+        ok &= expect(unsupported_receiver_response.front().namespace_ == namespace_receiver,
+                     "unsupported receiver namespace mismatch");
+        ok &= expect(contains(unsupported_receiver_response.front().payload_utf8,
+                              "\"type\":\"INVALID_REQUEST\""),
+                     "unsupported receiver invalid request type mismatch");
+        ok &= expect(contains(unsupported_receiver_response.front().payload_utf8,
+                              "\"reason\":\"INVALID_COMMAND\""),
+                     "unsupported receiver invalid reason mismatch");
+        ok &= expect(contains(unsupported_receiver_response.front().payload_utf8,
+                              "\"requestId\":21"),
+                     "unsupported receiver request id mismatch");
+        ok &= expect(unsupported_receiver_result.activity.event ==
+                         channel_event::receiver_command_rejected,
+                     "unsupported receiver activity mismatch");
+        ok &= expect(state.default_media_running,
+                     "unsupported receiver should not stop default app");
+    }
+
     channel_message load{
         .protocol_version = 0,
         .source_id = "sender-6",
@@ -415,6 +448,40 @@ int main() {
         ok &= expect(state.rejected_media_commands == 2, "wrong stop session rejection count");
         ok &=
             expect(state.media_session_active, "wrong stop session should not clear active media");
+    }
+
+    channel_message media_unsupported{
+        .protocol_version = 0,
+        .source_id = "sender-9",
+        .destination_id = "receiver-0",
+        .namespace_ = std::string(namespace_media),
+        .payload_type = channel_payload_type::string_payload,
+        .payload_utf8 = "{\"type\":\"QUEUE_UPDATE\",\"requestId\":22,\"mediaSessionId\":1}",
+        .payload_binary = {},
+    };
+    auto media_unsupported_result =
+        handle_channel_message_result(media_unsupported, "Living Room", state);
+    auto& media_unsupported_response = media_unsupported_result.responses;
+    ok &= expect(media_unsupported_response.size() == 1,
+                 "unsupported media response count mismatch");
+    if (!media_unsupported_response.empty()) {
+        ok &= expect(media_unsupported_response.front().namespace_ == namespace_media,
+                     "unsupported media namespace mismatch");
+        ok &= expect(contains(media_unsupported_response.front().payload_utf8,
+                              "\"type\":\"INVALID_REQUEST\""),
+                     "unsupported media invalid request type mismatch");
+        ok &= expect(contains(media_unsupported_response.front().payload_utf8,
+                              "\"reason\":\"INVALID_COMMAND\""),
+                     "unsupported media invalid reason mismatch");
+        ok &= expect(contains(media_unsupported_response.front().payload_utf8,
+                              "\"requestId\":22"),
+                     "unsupported media request id mismatch");
+        ok &= expect(media_unsupported_result.activity.event ==
+                         channel_event::media_command_rejected,
+                     "unsupported media activity mismatch");
+        ok &= expect(state.rejected_media_commands == 3,
+                     "unsupported media rejection count");
+        ok &= expect(state.media_session_active, "unsupported media should not clear active media");
     }
 
     channel_message media_stop{

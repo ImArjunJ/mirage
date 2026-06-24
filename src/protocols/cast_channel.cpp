@@ -60,6 +60,14 @@ receiver_client_stream_status control_stream_status(std::string reason) {
     };
 }
 
+receiver_client_stream_status control_attention_status(std::string reason) {
+    return {
+        .kind = "control",
+        .health = "attention",
+        .reason = std::move(reason),
+    };
+}
+
 receiver_client_stream_status app_stream_status(std::string reason) {
     return {
         .kind = "app",
@@ -130,6 +138,14 @@ void publish_cast_activity(receiver_session_observer* observer, uint64_t client_
                                                 control_stream_status("media_stopped"));
             }
             mirage::log::diagnostic("Cast media: stopped");
+            break;
+        case cast::channel_event::receiver_command_rejected:
+            if (observer != nullptr && client_status_id != 0) {
+                observer->client_stream_updated(
+                    client_status_id,
+                    control_attention_status(std::format("invalid_request:{}", activity.detail)));
+            }
+            mirage::log::diagnostic("Cast control: invalid_request={}", activity.detail);
             break;
         case cast::channel_event::media_command_rejected:
             if (observer != nullptr && client_status_id != 0) {
