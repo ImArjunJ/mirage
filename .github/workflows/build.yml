@@ -60,6 +60,7 @@ jobs:
           ./build/mirage paths
           ./build/mirage doctor --no-mdns
           ./build/mirage status
+          ./build/mirage service --help
           ctest --test-dir build --output-on-failure
           cmake --install build --prefix install-smoke
           test -x install-smoke/bin/mirage

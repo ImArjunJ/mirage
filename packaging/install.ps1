@@ -71,7 +71,7 @@ if ($StartService) {
 
 Write-Host "installed mirage to $Installed"
 if ($InstallService -or $StartService) {
-    Write-Host "windows service installed"
+    Write-Host "mirage service installed"
 }
 if (-not $AddToPath) {
     Write-Host "run with:"

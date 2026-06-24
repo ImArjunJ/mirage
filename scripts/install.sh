@@ -5,6 +5,8 @@ prefix="${MIRAGE_PREFIX:-$HOME/.local}"
 build_dir="build-release"
 config="Release"
 skip_build=0
+install_service=0
+start_service=0
 
 usage() {
     cat <<'EOF'
@@ -17,6 +19,8 @@ options:
   --build-dir <dir>   build directory, default build-release
   --debug             build debug instead of release
   --no-build          only run cmake --install
+  --install-service   install the user service after install
+  --start-service     install and start the user service
   -h, --help          show this help
 EOF
 }
@@ -46,6 +50,15 @@ while [ "$#" -gt 0 ]; do
             ;;
         --no-build)
             skip_build=1
+            shift
+            ;;
+        --install-service)
+            install_service=1
+            shift
+            ;;
+        --start-service)
+            install_service=1
+            start_service=1
             shift
             ;;
         -h|--help)
@@ -84,6 +97,14 @@ if [ ! -x "$installed" ]; then
 fi
 
 "$installed" --version >/dev/null
+
+if [ "$install_service" -eq 1 ]; then
+    "$installed" service install
+fi
+
+if [ "$start_service" -eq 1 ]; then
+    "$installed" service start
+fi
 
 echo "installed mirage to $installed"
 case ":$PATH:" in

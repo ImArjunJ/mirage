@@ -2,6 +2,8 @@
 set -eu
 
 prefix="${MIRAGE_PREFIX:-$HOME/.local}"
+install_service=0
+start_service=0
 
 usage() {
     cat <<'EOF'
@@ -11,6 +13,8 @@ installs this mirage package to a user prefix.
 
 options:
   --prefix <dir>      install prefix, default ~/.local
+  --install-service   install the user service after copying files
+  --start-service     install and start the user service
   -h, --help          show this help
 EOF
 }
@@ -24,6 +28,15 @@ while [ "$#" -gt 0 ]; do
             fi
             prefix="$2"
             shift 2
+            ;;
+        --install-service)
+            install_service=1
+            shift
+            ;;
+        --start-service)
+            install_service=1
+            start_service=1
+            shift
             ;;
         -h|--help)
             usage
@@ -60,6 +73,14 @@ if [ -d "$package_dir/share/doc/mirage" ]; then
 fi
 
 "$prefix/bin/mirage" --version >/dev/null
+
+if [ "$install_service" -eq 1 ]; then
+    "$prefix/bin/mirage" service install
+fi
+
+if [ "$start_service" -eq 1 ]; then
+    "$prefix/bin/mirage" service start
+fi
 
 echo "installed mirage to $prefix/bin/mirage"
 case ":$PATH:" in

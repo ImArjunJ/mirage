@@ -10,7 +10,7 @@ miracast / wi-fi display.
 - airplay mirroring and audio work on the tested ios + linux path
 - cast and miracast are experimental foundations, not complete media receivers
 - windows builds in ci; runtime testing is early
-- linux daemon mode and windows service commands are available
+- background service commands work on linux and windows
 - protected content is not supported
 
 ## install
@@ -39,20 +39,24 @@ full setup and troubleshooting: [docs/user-guide.md](docs/user-guide.md)
 ## common commands
 
 ```sh
+mirage doctor
 mirage
 mirage --diagnostics
-mirage status -v
 mirage paths
-mirage stop
 ```
 
-windows service, from an elevated powershell:
+background service:
 
-```powershell
+```sh
 mirage service install
 mirage service start
 mirage service status
+mirage service stop
 ```
+
+the service commands are the same on linux and windows. linux uses a per-user
+systemd service. windows uses the service manager and needs an elevated
+powershell for install or uninstall.
 
 ## config
 

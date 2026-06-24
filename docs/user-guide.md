@@ -35,6 +35,13 @@ mirage doctor
 mirage --diagnostics
 ```
 
+optional service install:
+
+```sh
+./install.sh --start-service
+mirage service status
+```
+
 windows powershell:
 
 ```powershell
@@ -47,7 +54,7 @@ mirage --diagnostics
 
 open a new terminal after using `-AddToPath`.
 
-optional windows service install, from an elevated powershell:
+optional service install, from an elevated powershell:
 
 ```powershell
 .\install.ps1 -AddToPath -InstallService -StartService
@@ -72,6 +79,12 @@ use a custom prefix when needed:
 
 ```sh
 ./scripts/install.sh --prefix /opt/mirage
+```
+
+install and start the user service:
+
+```sh
+./scripts/install.sh --start-service
 ```
 
 source builds need a c++23 compiler, cmake 3.25+, vulkan headers, and `glslc`.
@@ -165,17 +178,9 @@ foreground:
 mirage
 ```
 
-linux background process:
+background service:
 
 ```sh
-mirage --daemon
-mirage status -v
-mirage stop
-```
-
-windows service, from an elevated powershell:
-
-```powershell
 mirage service install
 mirage service start
 mirage service status
@@ -183,18 +188,33 @@ mirage service stop
 mirage service uninstall
 ```
 
+these commands are the same on linux and windows. linux uses a per-user systemd
+service. windows uses the service manager and needs an elevated powershell for
+install or uninstall.
+
 other useful commands:
 
 ```sh
 mirage paths
 ```
 
-the windows service runs under the service account, so its default state and
-config paths can differ from a normal terminal. use an explicit config path if
-you want predictable service config:
+service install stores runtime options. use an explicit config path if you want
+predictable service config:
+
+```sh
+mirage service install --config ~/.config/mirage/config.conf
+```
 
 ```powershell
 mirage service install --config C:\ProgramData\mirage\config.conf
+```
+
+if linux user systemd is not available, use the low-level background process:
+
+```sh
+mirage --daemon
+mirage status -v
+mirage stop
 ```
 
 use a persistent identity key if you do not want clients to see a fresh receiver

@@ -57,7 +57,7 @@ void print_help() {
     std::println(stderr, "  mirage stop                 stop background instance");
     std::println(stderr, "  mirage status               show current state");
     std::println(stderr, "  mirage status -v            show detailed state");
-    std::println(stderr, "  mirage service <command>    manage windows service");
+    std::println(stderr, "  mirage service <command>    manage background service");
     std::println(stderr, "  mirage paths                show runtime file paths");
     std::println(stderr, "  mirage doctor               check startup configuration");
     std::println(stderr, "");
@@ -506,6 +506,12 @@ using started_callback = void (*)();
 int run_receiver(const mirage::runtime_cli_options& parsed, bool owns_runtime_files,
                  bool show_stop_hint, started_callback on_started = nullptr);
 
+bool runtime_args_include_daemon(std::span<const std::string_view> args) {
+    return std::ranges::any_of(args, [](std::string_view arg) {
+        return arg == "--daemon" || arg == "-d" || arg == "--background-child";
+    });
+}
+
 #ifdef _WIN32
 std::wstring widen_utf8(std::string_view input) {
     if (input.empty()) {
@@ -734,12 +740,6 @@ void print_windows_service_usage() {
     std::println(stderr, "");
     std::println(stderr, "service install stores the runtime options in the windows service.");
     std::println(stderr, "run from an elevated powershell when installing or uninstalling.");
-}
-
-bool runtime_args_include_daemon(std::span<const std::string_view> args) {
-    return std::ranges::any_of(args, [](std::string_view arg) {
-        return arg == "--daemon" || arg == "-d" || arg == "--background-child";
-    });
 }
 
 std::wstring service_binary_command(std::span<const std::string_view> runtime_args) {
@@ -1165,23 +1165,276 @@ bool daemonize(pid_t& child_pid) {
     }
     return true;
 }
-#endif
 
-#ifndef _WIN32
-int handle_service_command(int argc, char* argv[]) {
-    if (argc < 3 || std::string_view(argv[2]) == "--help" || std::string_view(argv[2]) == "-h") {
-        std::println(stderr, "usage:");
-        std::println(stderr, "  mirage service install [runtime options]");
-        std::println(stderr, "  mirage service start");
-        std::println(stderr, "  mirage service stop");
-        std::println(stderr, "  mirage service status");
-        std::println(stderr, "  mirage service uninstall");
-        std::println(stderr, "");
-        std::println(stderr, "windows service support is only available on windows.");
+constexpr std::string_view linux_service_unit_name = "mirage.service";
+
+void print_linux_service_usage() {
+    std::println(stderr, "usage:");
+    std::println(stderr, "  mirage service install [runtime options]");
+    std::println(stderr, "  mirage service start");
+    std::println(stderr, "  mirage service stop");
+    std::println(stderr, "  mirage service status");
+    std::println(stderr, "  mirage service uninstall");
+    std::println(stderr, "");
+    std::println(stderr, "on linux, this manages a per-user systemd service.");
+    std::println(stderr, "service install stores the runtime options in the service.");
+}
+
+std::optional<std::filesystem::path> linux_systemd_user_dir() {
+    if (auto xdg_config_home = environment_value("XDG_CONFIG_HOME")) {
+        return std::filesystem::path(*xdg_config_home) / "systemd" / "user";
+    }
+    if (auto home = environment_value("HOME")) {
+        return std::filesystem::path(*home) / ".config" / "systemd" / "user";
+    }
+    return std::nullopt;
+}
+
+std::optional<std::filesystem::path> linux_service_unit_path() {
+    auto unit_dir = linux_systemd_user_dir();
+    if (!unit_dir) {
+        return std::nullopt;
+    }
+    return *unit_dir / std::string(linux_service_unit_name);
+}
+
+std::optional<std::filesystem::path> linux_executable_path() {
+    std::vector<char> buffer(4096);
+    for (;;) {
+        const auto size = readlink("/proc/self/exe", buffer.data(), buffer.size());
+        if (size < 0) {
+            return std::nullopt;
+        }
+        if (static_cast<size_t>(size) < buffer.size()) {
+            return std::filesystem::path(std::string(buffer.data(), static_cast<size_t>(size)));
+        }
+        buffer.resize(buffer.size() * 2);
+    }
+}
+
+bool contains_line_break(std::string_view value) {
+    return value.find('\n') != std::string_view::npos || value.find('\r') != std::string_view::npos;
+}
+
+std::string quote_systemd_exec_arg(std::string_view arg) {
+    std::string quoted = "\"";
+    for (char ch : arg) {
+        if (ch == '\\' || ch == '"') {
+            quoted.push_back('\\');
+            quoted.push_back(ch);
+        } else if (ch == '$') {
+            quoted += "$$";
+        } else if (ch == '%') {
+            quoted += "%%";
+        } else {
+            quoted.push_back(ch);
+        }
+    }
+    quoted.push_back('"');
+    return quoted;
+}
+
+std::string linux_service_exec_start(const std::filesystem::path& executable,
+                                     std::span<const std::string_view> runtime_args) {
+    std::string line = "ExecStart=" + quote_systemd_exec_arg(executable.string());
+    for (auto arg : runtime_args) {
+        line.push_back(' ');
+        line += quote_systemd_exec_arg(arg);
+    }
+    return line;
+}
+
+int run_systemctl_user(std::string_view args) {
+    const std::string command = std::format("systemctl --user {}", args);
+    return std::system(command.c_str());
+}
+
+void print_linux_service_fallback_hint() {
+    std::println(stderr, "linux service mode requires user systemd.");
+    std::println(stderr, "if this machine does not use user systemd, use: mirage --daemon");
+}
+
+int handle_linux_service_install(std::span<const std::string_view> runtime_args) {
+    if (runtime_args_include_daemon(runtime_args)) {
+        std::println(stderr, "service install does not accept --daemon.");
+        return 2;
+    }
+    for (auto arg : runtime_args) {
+        if (contains_line_break(arg)) {
+            std::println(stderr, "service install does not accept line breaks in arguments.");
+            return 2;
+        }
+    }
+    auto parsed = mirage::parse_runtime_cli_options(runtime_args, default_config_file_path());
+    if (!parsed) {
+        print_cli_error(parsed.error());
+        return parsed.error().exit_code();
+    }
+
+    auto executable = linux_executable_path();
+    if (!executable) {
+        std::println(stderr, "could not find mirage executable path.");
+        return 1;
+    }
+    auto unit_dir = linux_systemd_user_dir();
+    if (!unit_dir) {
+        std::println(stderr, "could not find a user config directory.");
+        return 1;
+    }
+    const auto unit_path = *unit_dir / std::string(linux_service_unit_name);
+
+    std::error_code ec;
+    std::filesystem::create_directories(*unit_dir, ec);
+    if (ec) {
+        std::println(stderr, "could not create service directory: {} ({})", unit_dir->string(),
+                     ec.message());
+        return 1;
+    }
+
+    std::ofstream unit_file(unit_path);
+    if (!unit_file.is_open()) {
+        std::println(stderr, "could not write service file: {}", unit_path.string());
+        return 1;
+    }
+    unit_file << "[Unit]\n";
+    unit_file << "Description=Mirage Receiver\n";
+    unit_file << "After=network-online.target sound.target\n\n";
+    unit_file << "[Service]\n";
+    unit_file << "Type=simple\n";
+    unit_file << linux_service_exec_start(*executable, runtime_args) << "\n";
+    unit_file << "Restart=on-failure\n";
+    unit_file << "RestartSec=2\n\n";
+    unit_file << "[Install]\n";
+    unit_file << "WantedBy=default.target\n";
+    unit_file.close();
+    if (!unit_file) {
+        std::println(stderr, "could not finish writing service file: {}", unit_path.string());
+        return 1;
+    }
+
+    if (run_systemctl_user("daemon-reload") != 0) {
+        std::println(stderr, "could not reload user systemd.");
+        print_linux_service_fallback_hint();
+        return 1;
+    }
+    if (run_systemctl_user("enable mirage.service") != 0) {
+        std::println(stderr, "could not enable mirage service.");
+        print_linux_service_fallback_hint();
+        return 1;
+    }
+    std::println(stderr, "mirage service installed.");
+    return 0;
+}
+
+int handle_linux_service_start() {
+    auto unit_path = linux_service_unit_path();
+    if (!unit_path || !std::filesystem::exists(*unit_path)) {
+        std::println(stderr, "mirage service is not installed.");
+        return 1;
+    }
+    if (run_systemctl_user("start mirage.service") != 0) {
+        std::println(stderr, "could not start mirage service.");
+        print_linux_service_fallback_hint();
+        return 1;
+    }
+    std::println(stderr, "mirage service started.");
+    return 0;
+}
+
+int handle_linux_service_stop() {
+    auto unit_path = linux_service_unit_path();
+    if (!unit_path || !std::filesystem::exists(*unit_path)) {
+        std::println(stderr, "mirage service is not installed.");
+        return 1;
+    }
+    if (run_systemctl_user("stop mirage.service") != 0) {
+        std::println(stderr, "could not stop mirage service.");
+        print_linux_service_fallback_hint();
+        return 1;
+    }
+    std::println(stderr, "mirage service stopped.");
+    return 0;
+}
+
+int handle_linux_service_status() {
+    auto unit_path = linux_service_unit_path();
+    if (!unit_path || !std::filesystem::exists(*unit_path)) {
+        std::println(stderr, "mirage service is not installed.");
+        return 1;
+    }
+    if (run_systemctl_user("--quiet is-active mirage.service") == 0) {
+        std::println(stderr, "mirage service: running");
+        auto status = mirage::read_runtime_pid_status(pid_file_path(), mirage::is_process_running);
+        if (status.state == mirage::runtime_pid_state::running && status.pid) {
+            std::println(stderr, "pid: {}", *status.pid);
+        }
         return 0;
     }
-    std::println(stderr, "windows service support is only available on windows.");
-    return 1;
+    if (run_systemctl_user("--quiet is-failed mirage.service") == 0) {
+        std::println(stderr, "mirage service: failed");
+        return 1;
+    }
+    std::println(stderr, "mirage service: stopped");
+    return 0;
+}
+
+int handle_linux_service_uninstall() {
+    auto unit_path = linux_service_unit_path();
+    if (!unit_path) {
+        std::println(stderr, "could not find a user config directory.");
+        return 1;
+    }
+    if (!std::filesystem::exists(*unit_path)) {
+        std::println(stderr, "mirage service is not installed.");
+        return 0;
+    }
+
+    run_systemctl_user("stop mirage.service");
+    run_systemctl_user("disable mirage.service");
+
+    std::error_code ec;
+    std::filesystem::remove(*unit_path, ec);
+    if (ec) {
+        std::println(stderr, "could not remove service file: {} ({})", unit_path->string(),
+                     ec.message());
+        return 1;
+    }
+    if (run_systemctl_user("daemon-reload") != 0) {
+        std::println(stderr, "could not reload user systemd.");
+        print_linux_service_fallback_hint();
+        return 1;
+    }
+    std::println(stderr, "mirage service uninstalled.");
+    return 0;
+}
+
+int handle_service_command(int argc, char* argv[]) {
+    if (argc < 3 || std::string_view(argv[2]) == "--help" || std::string_view(argv[2]) == "-h") {
+        print_linux_service_usage();
+        return 0;
+    }
+
+    const std::string_view command(argv[2]);
+    if (command == "install") {
+        auto runtime_args = argv_view(argc, argv, 3);
+        return handle_linux_service_install(runtime_args);
+    }
+    if (command == "start") {
+        return handle_linux_service_start();
+    }
+    if (command == "stop") {
+        return handle_linux_service_stop();
+    }
+    if (command == "status") {
+        return handle_linux_service_status();
+    }
+    if (command == "uninstall") {
+        return handle_linux_service_uninstall();
+    }
+
+    std::println(stderr, "unknown service command: {}", command);
+    print_linux_service_usage();
+    return 2;
 }
 #endif
 
