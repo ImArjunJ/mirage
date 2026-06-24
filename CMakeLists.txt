@@ -231,9 +231,34 @@ if(WIN32)
     target_link_libraries(mirage PRIVATE ws2_32 mswsock ole32 uuid)
 endif()
 
-install(TARGETS mirage RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+if(WIN32)
+    install(TARGETS mirage
+        RUNTIME_DEPENDENCY_SET mirage_runtime_dependencies
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+    install(RUNTIME_DEPENDENCY_SET mirage_runtime_dependencies
+        PRE_EXCLUDE_REGEXES
+            "api-ms-.*"
+            "ext-ms-.*"
+        POST_EXCLUDE_REGEXES
+            ".*[Ww][Ii][Nn][Dd][Oo][Ww][Ss][/\\\\][Ss]ystem32[/\\\\].*\\.dll"
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+else()
+    install(TARGETS mirage RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
 install(FILES ${SHADER_OUTPUTS} DESTINATION ${MIRAGE_INSTALL_SHADER_DIR})
 install(FILES README.md LICENSE DESTINATION ${CMAKE_INSTALL_DOCDIR})
+
+set(CPACK_PACKAGE_NAME "mirage")
+set(CPACK_PACKAGE_VENDOR "mirage")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "cross-platform receiver")
+set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+set(CPACK_GENERATOR "ZIP")
+set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)
+set(CPACK_PACKAGE_FILE_NAME
+    "${PROJECT_NAME}-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+include(CPack)
 
 include(CTest)
 if(BUILD_TESTING)
@@ -425,5 +450,14 @@ if(BUILD_TESTING)
             -Dinstall_config=$<CONFIG>
             -Dexecutable_name=$<TARGET_FILE_NAME:mirage>
             -P ${CMAKE_SOURCE_DIR}/tests/install_smoke.cmake
+    )
+
+    add_test(NAME package_smoke
+        COMMAND ${CMAKE_COMMAND}
+            -Dbuild_dir=${CMAKE_BINARY_DIR}
+            -Dpackage_dir=${CMAKE_BINARY_DIR}/package-smoke
+            -Dinstall_config=$<CONFIG>
+            -Dexecutable_name=$<TARGET_FILE_NAME:mirage>
+            -P ${CMAKE_SOURCE_DIR}/tests/package_smoke.cmake
     )
 endif()

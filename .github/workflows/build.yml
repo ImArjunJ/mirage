@@ -65,6 +65,10 @@ jobs:
           test -x install-smoke/bin/mirage
           test -f install-smoke/share/mirage/shaders/nv12_to_rgb.vert.spv
           test -f install-smoke/share/mirage/shaders/nv12_to_rgb.frag.spv
+      - name: package (linux)
+        if: runner.os == 'Linux'
+        run: |
+          cpack --config build/CPackConfig.cmake -G ZIP -B dist
       - name: verify (windows)
         if: runner.os == 'Windows'
         run: |
@@ -77,11 +81,13 @@ jobs:
           if (!(Test-Path install-smoke/bin/mirage.exe)) { throw "installed mirage.exe missing" }
           if (!(Test-Path install-smoke/share/mirage/shaders/nv12_to_rgb.vert.spv)) { throw "installed vertex shader missing" }
           if (!(Test-Path install-smoke/share/mirage/shaders/nv12_to_rgb.frag.spv)) { throw "installed fragment shader missing" }
+      - name: package (windows)
+        if: runner.os == 'Windows'
+        run: |
+          cpack --config build/CPackConfig.cmake -G ZIP -C Release -B dist
       - name: upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: mirage-${{ runner.os }}
-          path: |
-            build/mirage
-            build/Release/mirage.exe
-          if-no-files-found: ignore
+          path: dist/*.zip
+          if-no-files-found: error

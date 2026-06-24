@@ -1,6 +1,7 @@
 # Build directories
 build/
 out/
+dist/
 cmake-build-*/
 ref/
 .cache/
