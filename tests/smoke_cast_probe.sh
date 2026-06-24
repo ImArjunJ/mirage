@@ -362,15 +362,27 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
 
     sock.sendall(
         cast_message(
+            "urn:x-cast:com.google.cast.media",
+            '{"type":"STOP","requestId":13,"mediaSessionId":1}',
+        )
+    )
+    length = struct.unpack(">I", recv_exact(sock, 4))[0]
+    response = recv_exact(sock, length)
+    assert b"INVALID_REQUEST" in response
+    assert b'"reason":"INVALID_MEDIA_SESSION_ID"' in response
+    assert b'"requestId":13' in response
+
+    sock.sendall(
+        cast_message(
             "urn:x-cast:com.google.cast.receiver",
-            '{"type":"STOP","requestId":13,"sessionId":"default-media-session"}',
+            '{"type":"STOP","requestId":14,"sessionId":"default-media-session"}',
         )
     )
     length = struct.unpack(">I", recv_exact(sock, 4))[0]
     response = recv_exact(sock, length)
     assert b"RECEIVER_STATUS" in response
     assert b'"applications":[]' in response
-    assert b'"requestId":13' in response
+    assert b'"requestId":14' in response
     wait_status_contains(
         '"protocol":"cast"',
         '"media":{"active":false',
@@ -378,6 +390,30 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
         '"health":"clean"',
         '"reason":"default_media_stopped"',
     )
+
+    sock.sendall(
+        cast_message(
+            "urn:x-cast:com.google.cast.receiver",
+            '{"type":"STOP","requestId":15,"sessionId":"other-session"}',
+        )
+    )
+    length = struct.unpack(">I", recv_exact(sock, 4))[0]
+    response = recv_exact(sock, length)
+    assert b"RECEIVER_STATUS" in response
+    assert b'"applications":[]' in response
+    assert b'"requestId":15' in response
+
+    sock.sendall(
+        cast_message(
+            "urn:x-cast:com.google.cast.receiver",
+            '{"type":"STOP","requestId":16,"sessionId":"default-media-session"}',
+        )
+    )
+    length = struct.unpack(">I", recv_exact(sock, 4))[0]
+    response = recv_exact(sock, length)
+    assert b"RECEIVER_STATUS" in response
+    assert b'"applications":[]' in response
+    assert b'"requestId":16' in response
 
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 context.check_hostname = False

@@ -513,6 +513,35 @@ int main() {
         }
     }
 
+    channel_message stale_media_stop{
+        .protocol_version = 0,
+        .source_id = "sender-8",
+        .destination_id = "receiver-0",
+        .namespace_ = std::string(namespace_media),
+        .payload_type = channel_payload_type::string_payload,
+        .payload_utf8 = "{\"type\":\"STOP\",\"requestId\":23,\"mediaSessionId\":1}",
+        .payload_binary = {},
+    };
+    auto stale_media_stop_result =
+        handle_channel_message_result(stale_media_stop, "Living Room", state);
+    auto& stale_media_stop_response = stale_media_stop_result.responses;
+    ok &= expect(stale_media_stop_response.size() == 1, "stale stop response count mismatch");
+    if (!stale_media_stop_response.empty()) {
+        ok &= expect(contains(stale_media_stop_response.front().payload_utf8,
+                              "\"type\":\"INVALID_REQUEST\""),
+                     "stale stop invalid request type mismatch");
+        ok &= expect(contains(stale_media_stop_response.front().payload_utf8,
+                              "\"reason\":\"INVALID_MEDIA_SESSION_ID\""),
+                     "stale stop invalid reason mismatch");
+        ok &= expect(contains(stale_media_stop_response.front().payload_utf8, "\"requestId\":23"),
+                     "stale stop request id mismatch");
+        ok &= expect(stale_media_stop_result.activity.event ==
+                         channel_event::media_command_rejected,
+                     "stale stop activity mismatch");
+        ok &= expect(state.rejected_media_commands == 4, "stale stop rejection count");
+        ok &= expect(!state.media_session_active, "stale stop should keep media inactive");
+    }
+
     channel_message stop{
         .protocol_version = 0,
         .source_id = "sender-10",
@@ -536,6 +565,59 @@ int main() {
         ok &= expect(stop_result.activity.event == channel_event::default_media_stopped,
                      "receiver stop activity mismatch");
         ok &= expect(!state.default_media_running, "receiver stop state mismatch");
+    }
+
+    channel_message idle_wrong_session_stop{
+        .protocol_version = 0,
+        .source_id = "sender-10",
+        .destination_id = "receiver-0",
+        .namespace_ = std::string(namespace_receiver),
+        .payload_type = channel_payload_type::string_payload,
+        .payload_utf8 = "{\"type\":\"STOP\",\"requestId\":24,\"sessionId\":\"other-session\"}",
+        .payload_binary = {},
+    };
+    auto idle_wrong_session_stop_result =
+        handle_channel_message_result(idle_wrong_session_stop, "Living Room", state);
+    auto& idle_wrong_session_stop_response = idle_wrong_session_stop_result.responses;
+    ok &= expect(idle_wrong_session_stop_response.size() == 1,
+                 "idle wrong receiver stop response count mismatch");
+    if (!idle_wrong_session_stop_response.empty()) {
+        ok &= expect(contains(idle_wrong_session_stop_response.front().payload_utf8,
+                              "\"type\":\"RECEIVER_STATUS\""),
+                     "idle wrong receiver stop status type mismatch");
+        ok &= expect(contains(idle_wrong_session_stop_response.front().payload_utf8,
+                              "\"applications\":[]"),
+                     "idle wrong receiver stop app state mismatch");
+        ok &= expect(contains(idle_wrong_session_stop_response.front().payload_utf8,
+                              "\"requestId\":24"),
+                     "idle wrong receiver stop request id mismatch");
+        ok &= expect(idle_wrong_session_stop_result.activity.event == channel_event::none,
+                     "idle wrong receiver stop activity mismatch");
+    }
+
+    channel_message idle_stop{
+        .protocol_version = 0,
+        .source_id = "sender-10",
+        .destination_id = "receiver-0",
+        .namespace_ = std::string(namespace_receiver),
+        .payload_type = channel_payload_type::string_payload,
+        .payload_utf8 =
+            "{\"type\":\"STOP\",\"requestId\":25,\"sessionId\":\"default-media-session\"}",
+        .payload_binary = {},
+    };
+    auto idle_stop_result = handle_channel_message_result(idle_stop, "Living Room", state);
+    auto& idle_stop_response = idle_stop_result.responses;
+    ok &= expect(idle_stop_response.size() == 1, "idle receiver stop response count mismatch");
+    if (!idle_stop_response.empty()) {
+        ok &= expect(contains(idle_stop_response.front().payload_utf8,
+                              "\"type\":\"RECEIVER_STATUS\""),
+                     "idle receiver stop status type mismatch");
+        ok &= expect(contains(idle_stop_response.front().payload_utf8, "\"applications\":[]"),
+                     "idle receiver stop app state mismatch");
+        ok &= expect(contains(idle_stop_response.front().payload_utf8, "\"requestId\":25"),
+                     "idle receiver stop request id mismatch");
+        ok &= expect(idle_stop_result.activity.event == channel_event::none,
+                     "idle receiver stop activity mismatch");
     }
 
     std::vector<std::byte> invalid_varint(12, std::byte{0x80});

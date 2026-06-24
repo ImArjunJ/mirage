@@ -747,26 +747,29 @@ channel_message_result handle_channel_message_result(const channel_message& mess
     }
 
     if (message.namespace_ == namespace_receiver && *type == "STOP") {
-        if (state.default_media_running && !default_media_session_matches(message.payload_utf8)) {
+        const auto request_id = extract_json_int(message.payload_utf8, "requestId");
+        if (!default_media_session_matches(message.payload_utf8)) {
             result.responses.push_back(make_string_message(
                 message.source_id, namespace_receiver,
-                receiver_status_payload(
-                    device_name, extract_json_int(message.payload_utf8, "requestId"), state)));
+                receiver_status_payload(device_name, request_id, state)));
             return result;
         }
+
+        const bool had_default_media = state.default_media_running || state.media_session_active;
         state.default_media_running = false;
         if (state.media_session_active) {
             clear_media_session(state);
             result.media_status = receiver_media_status(state);
         }
         result.responses.push_back(make_string_message(
-            message.source_id, namespace_receiver,
-            receiver_status_payload(device_name,
-                                    extract_json_int(message.payload_utf8, "requestId"), state)));
-        result.activity = {
-            .event = channel_event::default_media_stopped,
-            .detail = std::string(default_media_app_id),
-        };
+            message.source_id, namespace_receiver, receiver_status_payload(device_name, request_id,
+                                                                           state)));
+        if (had_default_media) {
+            result.activity = {
+                .event = channel_event::default_media_stopped,
+                .detail = std::string(default_media_app_id),
+            };
+        }
         return result;
     }
 
@@ -841,16 +844,25 @@ channel_message_result handle_channel_message_result(const channel_message& mess
     }
 
     if (message.namespace_ == namespace_media && *type == "STOP") {
+        const auto request_id = extract_json_int(message.payload_utf8, "requestId");
         constexpr std::string_view reason = "INVALID_MEDIA_SESSION_ID";
-        if (state.media_session_active && !media_session_matches(message.payload_utf8, state)) {
-            reject_media_command(result, state, message.source_id,
-                                 extract_json_int(message.payload_utf8, "requestId"), reason);
+        const auto requested_session_id = extract_json_int(message.payload_utf8, "mediaSessionId");
+        if (!state.media_session_active) {
+            if (requested_session_id) {
+                reject_media_command(result, state, message.source_id, request_id, reason);
+                return result;
+            }
+            result.responses.push_back(make_string_message(
+                message.source_id, namespace_media, media_status_payload(request_id, state)));
+            return result;
+        }
+        if (!media_session_matches(message.payload_utf8, state)) {
+            reject_media_command(result, state, message.source_id, request_id, reason);
             return result;
         }
         clear_media_session(state);
         result.responses.push_back(make_string_message(
-            message.source_id, namespace_media,
-            media_status_payload(extract_json_int(message.payload_utf8, "requestId"), state)));
+            message.source_id, namespace_media, media_status_payload(request_id, state)));
         result.activity = {
             .event = channel_event::media_stopped,
             .detail = "stopped",
