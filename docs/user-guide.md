@@ -184,6 +184,7 @@ background service:
 mirage service install
 mirage service start
 mirage service status
+mirage service logs -f
 mirage service stop
 mirage service uninstall
 ```
@@ -191,6 +192,16 @@ mirage service uninstall
 these commands are the same on linux and windows. linux uses a per-user systemd
 service. windows uses the service manager and needs an elevated powershell for
 install or uninstall.
+
+for background diagnostics, update the service with diagnostics enabled and
+watch the service logs:
+
+```sh
+mirage service stop
+mirage service install --diagnostics
+mirage service start
+mirage service logs -f
+```
 
 other useful commands:
 

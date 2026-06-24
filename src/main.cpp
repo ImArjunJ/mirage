@@ -2,6 +2,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstdio>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -508,6 +509,113 @@ bool runtime_args_include_daemon(std::span<const std::string_view> args) {
     });
 }
 
+struct service_logs_options {
+    bool follow = false;
+};
+
+void print_service_logs_usage() {
+    std::println(stderr, "usage:");
+    std::println(stderr, "  mirage service logs");
+    std::println(stderr, "  mirage service logs -f");
+    std::println(stderr, "");
+    std::println(stderr, "shows recent background service logs. use -f to follow.");
+}
+
+int parse_service_logs_options(std::span<const std::string_view> args,
+                               service_logs_options& options) {
+    for (auto arg : args) {
+        if (arg == "-f" || arg == "--follow") {
+            options.follow = true;
+            continue;
+        }
+        if (arg == "-h" || arg == "--help") {
+            print_service_logs_usage();
+            return 1;
+        }
+        std::println(stderr, "unknown service logs option: {}", arg);
+        print_service_logs_usage();
+        return 2;
+    }
+    return 0;
+}
+
+#ifdef _WIN32
+bool print_last_log_lines(const std::filesystem::path& path, size_t max_lines,
+                          std::uintmax_t* end_position = nullptr) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file.is_open()) {
+        std::println(stderr, "service log not found: {}", path.string());
+        std::println(stderr, "try: mirage service install --diagnostics");
+        return false;
+    }
+
+    std::vector<std::string> lines;
+    std::string line;
+    while (std::getline(file, line)) {
+        if (lines.size() == max_lines) {
+            lines.erase(lines.begin());
+        }
+        lines.push_back(line);
+    }
+    for (const auto& recent : lines) {
+        std::println("{}", recent);
+    }
+
+    if (end_position != nullptr) {
+        file.clear();
+        file.seekg(0, std::ios::end);
+        auto pos = file.tellg();
+        *end_position = pos < 0 ? 0 : static_cast<std::uintmax_t>(pos);
+    }
+    return true;
+}
+
+int follow_log_file(const std::filesystem::path& path, size_t max_lines) {
+    signal_received = 0;
+    std::signal(SIGINT, signal_handler);
+    std::signal(SIGTERM, signal_handler);
+
+    std::uintmax_t position = 0;
+    if (!print_last_log_lines(path, max_lines, &position)) {
+        std::println(stderr, "waiting for service log. press ctrl+c to stop.");
+    }
+
+    std::vector<char> buffer(4096);
+    while (signal_received == 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+        std::error_code ec;
+        auto size = std::filesystem::file_size(path, ec);
+        if (ec) {
+            continue;
+        }
+        if (size < position) {
+            position = 0;
+        }
+        if (size == position) {
+            continue;
+        }
+
+        std::ifstream file(path, std::ios::binary);
+        if (!file.is_open()) {
+            continue;
+        }
+        file.seekg(static_cast<std::streamoff>(position), std::ios::beg);
+        while (file && signal_received == 0) {
+            file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+            const auto count = file.gcount();
+            if (count <= 0) {
+                break;
+            }
+            std::print("{}", std::string_view(buffer.data(), static_cast<size_t>(count)));
+            position += static_cast<std::uintmax_t>(count);
+        }
+        std::fflush(stdout);
+    }
+    return 0;
+}
+#endif
+
 #ifdef _WIN32
 std::wstring widen_utf8(std::string_view input) {
     if (input.empty()) {
@@ -605,19 +713,29 @@ std::wstring quote_windows_arg(std::wstring_view arg) {
     return quoted;
 }
 
-bool redirect_windows_output_to_log() {
-    auto dir = state_dir();
+std::filesystem::path windows_service_log_file_path() {
+    if (auto program_data = environment_value("ProgramData")) {
+        return std::filesystem::path(*program_data) / "mirage" / "mirage.log";
+    }
+    return std::filesystem::path("C:\\ProgramData") / "mirage" / "mirage.log";
+}
+
+bool redirect_windows_output_to_log(const std::filesystem::path& log_path) {
+    auto dir = log_path.parent_path();
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
     if (ec) {
         return false;
     }
-    auto log_path = dir / "mirage.log";
     FILE* stderr_file = nullptr;
     FILE* stdout_file = nullptr;
     _wfreopen_s(&stderr_file, log_path.c_str(), L"a", stderr);
     _wfreopen_s(&stdout_file, log_path.c_str(), L"a", stdout);
     return stderr_file != nullptr || stdout_file != nullptr;
+}
+
+bool redirect_windows_output_to_log() {
+    return redirect_windows_output_to_log(state_dir() / "mirage.log");
 }
 
 bool daemonize_child() {
@@ -732,6 +850,7 @@ void print_windows_service_usage() {
     std::println(stderr, "  mirage service start");
     std::println(stderr, "  mirage service stop");
     std::println(stderr, "  mirage service status");
+    std::println(stderr, "  mirage service logs [-f]");
     std::println(stderr, "  mirage service uninstall");
     std::println(stderr, "");
     std::println(stderr, "service install stores the runtime options in the windows service.");
@@ -877,6 +996,8 @@ int handle_windows_service_install(std::span<const std::string_view> runtime_arg
         SERVICE_WIN32_OWN_PROCESS, SERVICE_AUTO_START, SERVICE_ERROR_NORMAL, binary_command.c_str(),
         nullptr, nullptr, nullptr, nullptr, nullptr));
     if (service.value != nullptr) {
+        std::error_code ec;
+        std::filesystem::create_directories(windows_service_log_file_path().parent_path(), ec);
         std::println(stderr, "mirage service installed.");
         return 0;
     }
@@ -904,6 +1025,8 @@ int handle_windows_service_install(std::span<const std::string_view> runtime_arg
                      windows_error_message(GetLastError()));
         return 1;
     }
+    std::error_code ec;
+    std::filesystem::create_directories(windows_service_log_file_path().parent_path(), ec);
     std::println(stderr, "mirage service updated.");
     return 0;
 }
@@ -976,6 +1099,23 @@ int handle_windows_service_status() {
     return 0;
 }
 
+int handle_windows_service_logs(std::span<const std::string_view> args) {
+    service_logs_options options;
+    const int parse_result = parse_service_logs_options(args, options);
+    if (parse_result == 1) {
+        return 0;
+    }
+    if (parse_result != 0) {
+        return parse_result;
+    }
+
+    auto path = windows_service_log_file_path();
+    if (options.follow) {
+        return follow_log_file(path, 200);
+    }
+    return print_last_log_lines(path, 200) ? 0 : 1;
+}
+
 int handle_windows_service_uninstall() {
     auto scm = open_service_control_manager(SC_MANAGER_CONNECT);
     if (scm.value == nullptr) {
@@ -1039,7 +1179,7 @@ void WINAPI windows_service_main(DWORD, LPWSTR*) {
     }
     windows_service_checkpoint = 1;
     set_windows_service_status(SERVICE_START_PENDING, NO_ERROR, 15000);
-    redirect_windows_output_to_log();
+    redirect_windows_output_to_log(windows_service_log_file_path());
 
     auto views = service_arg_views(windows_service_runtime_args);
     auto parsed = mirage::parse_runtime_cli_options(views, default_config_file_path());
@@ -1099,6 +1239,9 @@ int handle_service_command(int argc, char* argv[]) {
     }
     if (command == "status") {
         return handle_windows_service_status();
+    }
+    if (command == "logs") {
+        return handle_windows_service_logs(argv_view(argc, argv, 3));
     }
     if (command == "uninstall") {
         return handle_windows_service_uninstall();
@@ -1170,6 +1313,7 @@ void print_linux_service_usage() {
     std::println(stderr, "  mirage service start");
     std::println(stderr, "  mirage service stop");
     std::println(stderr, "  mirage service status");
+    std::println(stderr, "  mirage service logs [-f]");
     std::println(stderr, "  mirage service uninstall");
     std::println(stderr, "");
     std::println(stderr, "on linux, this manages a per-user systemd service.");
@@ -1374,6 +1518,29 @@ int handle_linux_service_status() {
     return 0;
 }
 
+int handle_linux_service_logs(std::span<const std::string_view> args) {
+    service_logs_options options;
+    const int parse_result = parse_service_logs_options(args, options);
+    if (parse_result == 1) {
+        return 0;
+    }
+    if (parse_result != 0) {
+        return parse_result;
+    }
+
+    auto unit_path = linux_service_unit_path();
+    if (!unit_path || !std::filesystem::exists(*unit_path)) {
+        std::println(stderr, "mirage service is not installed.");
+        return 1;
+    }
+
+    std::string command = "journalctl --user -u mirage.service -n 200 --no-pager";
+    if (options.follow) {
+        command += " -f";
+    }
+    return std::system(command.c_str()) == 0 ? 0 : 1;
+}
+
 int handle_linux_service_uninstall() {
     auto unit_path = linux_service_unit_path();
     if (!unit_path) {
@@ -1423,6 +1590,9 @@ int handle_service_command(int argc, char* argv[]) {
     }
     if (command == "status") {
         return handle_linux_service_status();
+    }
+    if (command == "logs") {
+        return handle_linux_service_logs(argv_view(argc, argv, 3));
     }
     if (command == "uninstall") {
         return handle_linux_service_uninstall();

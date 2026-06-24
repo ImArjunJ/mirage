@@ -50,6 +50,7 @@ install the background service:
 mirage service install
 mirage service start
 mirage service status
+mirage service logs -f
 ```
 
 on windows, run the service install commands from an elevated powershell.
@@ -79,12 +80,22 @@ background service:
 mirage service install
 mirage service start
 mirage service status
+mirage service logs -f
 mirage service stop
 ```
 
 the service commands are the same on linux and windows. linux uses a per-user
 systemd service. windows uses the service manager and needs an elevated
 powershell for install or uninstall.
+
+for background diagnostics, install the service with diagnostics enabled:
+
+```sh
+mirage service stop
+mirage service install --diagnostics
+mirage service start
+mirage service logs -f
+```
 
 ## config
 
