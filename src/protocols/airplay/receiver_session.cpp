@@ -15,13 +15,15 @@ class airplay_receiver_session final : public receiver_session {
 public:
     airplay_receiver_session(io::io_context& ctx, receiver_source_descriptor source,
                              crypto::ed25519_keypair keypair, std::string device_name,
-                             std::string mac_address, receiver_session_observer* observer)
+                             std::string mac_address, bool hardware_decode,
+                             receiver_session_observer* observer)
         : ctx_(ctx),
           source_(source),
           keypair_(std::move(keypair)),
           public_key_(keypair_.public_key()),
           device_name_(std::move(device_name)),
           mac_address_(std::move(mac_address)),
+          hardware_decode_(hardware_decode),
           observer_(observer) {}
 
     [[nodiscard]] protocol id() const override { return source_.id; }
@@ -33,7 +35,8 @@ public:
 
     result<void> start(receiver_adapter_registry& adapters,
                        discovery::service_publisher& publisher) override {
-        auto server = rtsp_server::bind(ctx_, source_, std::move(keypair_), observer_);
+        auto server = rtsp_server::bind(ctx_, source_, std::move(keypair_), hardware_decode_,
+                                        observer_);
         if (!server) {
             adapters.mark_error(id(), server.error().message);
             return std::unexpected(server.error());
@@ -97,6 +100,7 @@ private:
     std::array<std::byte, 32> public_key_;
     std::string device_name_;
     std::string mac_address_;
+    bool hardware_decode_ = true;
     receiver_session_observer* observer_ = nullptr;
     std::optional<rtsp_server> rtsp_;
 };
@@ -108,9 +112,11 @@ std::unique_ptr<receiver_session> make_airplay_receiver_session(io::io_context& 
                                                                 crypto::ed25519_keypair keypair,
                                                                 std::string device_name,
                                                                 std::string mac_address,
+                                                                bool hardware_decode,
                                                                 receiver_session_observer* observer) {
     return std::make_unique<airplay_receiver_session>(
-        ctx, source, std::move(keypair), std::move(device_name), std::move(mac_address), observer);
+        ctx, source, std::move(keypair), std::move(device_name), std::move(mac_address),
+        hardware_decode, observer);
 }
 
 }  // namespace mirage::protocols

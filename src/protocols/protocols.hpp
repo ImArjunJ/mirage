@@ -35,6 +35,7 @@ public:
     static std::shared_ptr<rtsp_session> create(io::tcp_stream socket,
                                                 crypto::fairplay_pairing pairing,
                                                 receiver_source_descriptor source,
+                                                bool hardware_decode,
                                                 receiver_session_observer* observer = nullptr,
                                                 uint64_t client_status_id = 0);
     io::task<result<void>> run();
@@ -73,8 +74,8 @@ private:
     void close_stream_sockets();
     void publish_media_status();
     rtsp_session(io::tcp_stream socket, crypto::fairplay_pairing pairing,
-                 receiver_source_descriptor source, receiver_session_observer* observer,
-                 uint64_t client_status_id);
+                 receiver_source_descriptor source, bool hardware_decode,
+                 receiver_session_observer* observer, uint64_t client_status_id);
     io::tcp_stream socket_;
     crypto::fairplay_pairing pairing_;
     rtsp_session_state state_ = rtsp_session_state::init;
@@ -88,6 +89,7 @@ private:
     std::unique_ptr<io::udp_socket> audio_control_socket_;
     std::unique_ptr<media::media_sink> media_sink_;
     receiver_source_descriptor source_;
+    bool hardware_decode_ = true;
     receiver_session_observer* observer_ = nullptr;
     uint64_t client_status_id_ = 0;
     airplay::media_source airplay_media_;
@@ -112,6 +114,7 @@ class rtsp_server {
 public:
     static result<rtsp_server> bind(io::io_context& ctx, receiver_source_descriptor source,
                                     crypto::ed25519_keypair keypair,
+                                    bool hardware_decode,
                                     receiver_session_observer* observer = nullptr);
     io::task<void> run();
     void stop();
@@ -119,11 +122,13 @@ public:
 private:
     struct session_store;
     rtsp_server(io::tcp_acceptor acceptor, receiver_source_descriptor source,
-                crypto::ed25519_keypair keypair, receiver_session_observer* observer);
+                crypto::ed25519_keypair keypair, bool hardware_decode,
+                receiver_session_observer* observer);
     io::tcp_acceptor acceptor_;
     receiver_source_descriptor source_;
     crypto::ed25519_keypair keypair_;
     std::shared_ptr<session_store> sessions_;
+    bool hardware_decode_ = true;
     bool running_ = false;
 };
 enum class cast_message_type : uint8_t { connect, close, heartbeat, get_status, launch_app, media };

@@ -590,20 +590,23 @@ static receiver_video_stream_summary make_video_summary(const airplay::video_sou
 }
 
 rtsp_session::rtsp_session(io::tcp_stream socket, crypto::fairplay_pairing pairing,
-                           receiver_source_descriptor source,
+                           receiver_source_descriptor source, bool hardware_decode,
                            receiver_session_observer* observer, uint64_t client_status_id)
     : socket_(std::move(socket)),
       pairing_(std::move(pairing)),
       media_sink_(media::make_local_media_sink()),
       source_(source),
+      hardware_decode_(hardware_decode),
       observer_(observer),
       client_status_id_(client_status_id),
       airplay_media_(*media_sink_) {}
 auto rtsp_session::create(io::tcp_stream socket, crypto::fairplay_pairing pairing,
-                          receiver_source_descriptor source, receiver_session_observer* observer,
+                          receiver_source_descriptor source, bool hardware_decode,
+                          receiver_session_observer* observer,
                           uint64_t client_status_id) -> std::shared_ptr<rtsp_session> {
     return std::shared_ptr<rtsp_session>(new rtsp_session(
-        std::move(socket), std::move(pairing), source, observer, client_status_id));
+        std::move(socket), std::move(pairing), source, hardware_decode, observer,
+        client_status_id));
 }
 void rtsp_session::reset_audio_packet_state() {
     audio_resend_control_seqnum_ = 0;
@@ -1671,7 +1674,7 @@ io::task<void> rtsp_session::run_mirror_receiver() {
             sink_config.codec = video_codec::h264;
             sink_config.width = 1280;
             sink_config.height = 720;
-            sink_config.prefer_hardware = true;
+            sink_config.prefer_hardware = hardware_decode_;
             sink_config.title = "Mirage - AirPlay";
 
             airplay::video_source_config source_config;
@@ -2311,20 +2314,23 @@ struct rtsp_server::session_store {
     bool stopping = false;
 };
 rtsp_server::rtsp_server(io::tcp_acceptor acceptor, receiver_source_descriptor source,
-                         crypto::ed25519_keypair keypair, receiver_session_observer* observer)
+                         crypto::ed25519_keypair keypair, bool hardware_decode,
+                         receiver_session_observer* observer)
     : acceptor_(std::move(acceptor)),
       source_(source),
       keypair_(std::move(keypair)),
-      sessions_(std::make_shared<session_store>()) {
+      sessions_(std::make_shared<session_store>()),
+      hardware_decode_(hardware_decode) {
     sessions_->observer = observer;
 }
 auto rtsp_server::bind(io::io_context& ctx, receiver_source_descriptor source,
-                       crypto::ed25519_keypair keypair,
+                       crypto::ed25519_keypair keypair, bool hardware_decode,
                        receiver_session_observer* observer) -> result<rtsp_server> {
     try {
         auto acceptor = io::tcp_acceptor::bind(ctx, source.port);
         mirage::log::info("RTSP server bound to port {}", source.port);
-        return rtsp_server{std::move(acceptor), source, std::move(keypair), observer};
+        return rtsp_server{std::move(acceptor), source, std::move(keypair), hardware_decode,
+                           observer};
     } catch (const std::exception& e) {
         return std::unexpected(
             mirage_error::network(std::format("failed to bind RTSP server: {}", e.what())));
@@ -2356,7 +2362,8 @@ io::task<void> rtsp_server::run() {
                 });
             }
             auto session = rtsp_session::create(std::move(socket), std::move(pairing), source_,
-                                                sessions_->observer, client_status_id);
+                                                hardware_decode_, sessions_->observer,
+                                                client_status_id);
             auto sessions = sessions_;
             auto session_id = sessions->add(session);
             io::co_spawn(acceptor_.context(), [session, sessions, session_id,

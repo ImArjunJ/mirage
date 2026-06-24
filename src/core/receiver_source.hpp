@@ -32,6 +32,7 @@ struct receiver_source_runtime {
     receiver_session_observer* session_observer = nullptr;
     std::string_view device_name;
     std::string_view mac_address;
+    bool hardware_decode = true;
 };
 
 using receiver_source_validate_fn = result<void> (*)(const receiver_source_descriptor& source,

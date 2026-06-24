@@ -703,6 +703,7 @@ int main(int argc, char* argv[]) {
             .session_observer = &status_tracker,
             .device_name = cfg.device_name,
             .mac_address = mac_address,
+            .hardware_decode = cfg.hardware_decode,
         };
         auto start_receiver_session = [&](std::unique_ptr<mirage::receiver_session> session) {
             auto id = session->id();

@@ -16,6 +16,7 @@ std::unique_ptr<receiver_session> make_airplay_receiver_session(io::io_context& 
                                                                 crypto::ed25519_keypair keypair,
                                                                 std::string device_name,
                                                                 std::string mac_address,
+                                                                bool hardware_decode,
                                                                 receiver_session_observer* observer);
 
 std::unique_ptr<receiver_session> make_cast_receiver_session(io::io_context& ctx,
