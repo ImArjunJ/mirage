@@ -2,8 +2,8 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
-#include <iostream>
 #include <initializer_list>
+#include <iostream>
 #include <string_view>
 #include <system_error>
 #include <vector>
@@ -52,8 +52,8 @@ int main() {
     std::error_code ec;
     std::filesystem::remove(missing_default, ec);
 
-    auto default_args = args({"--name", "Desk", "--port", "7100", "--cast", "--no-mdns",
-                              "--debug", "--daemon"});
+    auto default_args =
+        args({"--name", "Desk", "--port", "7100", "--cast", "--no-mdns", "--debug", "--daemon"});
     auto defaults = mirage::parse_runtime_cli_options(default_args, missing_default);
     ok &= expect(defaults.has_value(), "default runtime options did not parse");
     if (defaults) {
@@ -66,6 +66,15 @@ int main() {
         ok &= expect(defaults->no_mdns, "no-mdns flag mismatch");
         ok &= expect(defaults->debug, "debug flag mismatch");
         ok &= expect(defaults->daemon_mode, "daemon flag mismatch");
+    }
+
+    auto background_child_args = args({"--background-child"});
+    auto background_child =
+        mirage::parse_runtime_cli_options(background_child_args, missing_default);
+    ok &= expect(background_child.has_value(), "background child option did not parse");
+    if (background_child) {
+        ok &= expect(background_child->daemon_mode, "background child did not imply daemon");
+        ok &= expect(background_child->background_child_mode, "background child flag mismatch");
     }
 
     const auto config_path = temp_path("configured");
@@ -82,9 +91,9 @@ identity_key = from-config.key
                  "could not write test config");
     const auto config_path_string = config_path.string();
 
-    auto override_args = args({"--config", config_path_string, "--name", "Override",
-                               "--cast-port", "8100", "--no-cast", "--miracast",
-                               "--identity-key", "from-cli.key", "--trace", "--diagnostics"});
+    auto override_args = args({"--config", config_path_string, "--name", "Override", "--cast-port",
+                               "8100", "--no-cast", "--miracast", "--identity-key", "from-cli.key",
+                               "--trace", "--diagnostics"});
     auto overrides = mirage::parse_runtime_cli_options(override_args, missing_default);
     ok &= expect(overrides.has_value(), "configured runtime options did not parse");
     if (overrides) {
@@ -109,16 +118,14 @@ identity_key = from-config.key
     ok &= expect(!bad_port, "bad port unexpectedly parsed");
     if (!bad_port) {
         ok &= expect(bad_port.error().exit_code() == 2, "bad port exit code mismatch");
-        ok &= expect(message_contains(bad_port.error(), "--port"),
-                     "bad port error missing option");
+        ok &= expect(message_contains(bad_port.error(), "--port"), "bad port error missing option");
     }
 
     auto missing_value_args = args({"--identity-key"});
     auto missing_value = mirage::parse_runtime_cli_options(missing_value_args, missing_default);
     ok &= expect(!missing_value, "missing value unexpectedly parsed");
     if (!missing_value) {
-        ok &= expect(missing_value.error().exit_code() == 2,
-                     "missing value exit code mismatch");
+        ok &= expect(missing_value.error().exit_code() == 2, "missing value exit code mismatch");
         ok &= expect(message_contains(missing_value.error(), "--identity-key"),
                      "missing value error missing option");
     }

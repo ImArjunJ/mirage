@@ -13,8 +13,8 @@ bool runtime_flag_option(std::string_view option) {
     return option == "--no-airplay" || option == "--cast" || option == "--miracast" ||
            option == "--no-cast" || option == "--no-miracast" || option == "--no-mdns" ||
            option == "--daemon" || option == "-d" || option == "--diagnostics" ||
-           option == "--debug" || option == "--trace" || option == "--verbose" ||
-           option == "-v";
+           option == "--debug" || option == "--trace" || option == "--verbose" || option == "-v" ||
+           option == "--background-child";
 }
 
 mirage::cli_error usage_error(std::string message) {
@@ -35,16 +35,15 @@ cli_result<uint16_t> parse_cli_port(std::string_view option, std::string_view va
     const auto* end = value.data() + value.size();
     auto [ptr, ec] = std::from_chars(begin, end, parsed);
     if (ec != std::errc{} || ptr != end || parsed > 65535) {
-        return std::unexpected(usage_error(std::format(
-            "{} expects a port from 0 to 65535, got '{}'", option, value)));
+        return std::unexpected(
+            usage_error(std::format("{} expects a port from 0 to 65535, got '{}'", option, value)));
     }
     return static_cast<uint16_t>(parsed);
 }
 
 bool runtime_option_takes_value(std::string_view option) {
     return option == "--config" || option == "--name" || option == "--port" ||
-           option == "--cast-port" || option == "--miracast-port" ||
-           option == "--identity-key";
+           option == "--cast-port" || option == "--miracast-port" || option == "--identity-key";
 }
 
 cli_result<runtime_cli_options> parse_runtime_cli_options(
@@ -128,6 +127,9 @@ cli_result<runtime_cli_options> parse_runtime_cli_options(
         } else if (arg == "--no-mdns") {
             options.no_mdns = true;
         } else if (arg == "--daemon" || arg == "-d") {
+            options.daemon_mode = true;
+        } else if (arg == "--background-child") {
+            options.background_child_mode = true;
             options.daemon_mode = true;
         }
     }

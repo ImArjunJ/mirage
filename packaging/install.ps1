@@ -1,6 +1,9 @@
 param(
     [string]$Prefix,
-    [switch]$AddToPath
+    [switch]$AddToPath,
+    [switch]$InstallService,
+    [switch]$StartService,
+    [string[]]$ServiceArgs = @()
 )
 
 $ErrorActionPreference = "Stop"
@@ -52,7 +55,24 @@ if ($AddToPath) {
     }
 }
 
+if ($InstallService -or $StartService) {
+    & $Installed service install @ServiceArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "service install failed"
+    }
+}
+
+if ($StartService) {
+    & $Installed service start
+    if ($LASTEXITCODE -ne 0) {
+        throw "service start failed"
+    }
+}
+
 Write-Host "installed mirage to $Installed"
+if ($InstallService -or $StartService) {
+    Write-Host "windows service installed"
+}
 if (-not $AddToPath) {
     Write-Host "run with:"
     Write-Host "  $Installed"

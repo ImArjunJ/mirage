@@ -1,10 +1,12 @@
 #include <algorithm>
 #include <chrono>
 #include <csignal>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <print>
@@ -12,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -24,8 +27,8 @@
 #include <unistd.h>
 #endif
 
-#include "core/core.hpp"
 #include "core/cli_options.hpp"
+#include "core/core.hpp"
 #include "core/doctor_checks.hpp"
 #include "core/log.hpp"
 #include "core/port_probe.hpp"
@@ -54,6 +57,7 @@ void print_help() {
     std::println(stderr, "  mirage stop                 stop background instance");
     std::println(stderr, "  mirage status               show current state");
     std::println(stderr, "  mirage status -v            show detailed state");
+    std::println(stderr, "  mirage service <command>    manage windows service");
     std::println(stderr, "  mirage paths                show runtime file paths");
     std::println(stderr, "  mirage doctor               check startup configuration");
     std::println(stderr, "");
@@ -117,8 +121,7 @@ std::filesystem::path state_dir() {
 }
 
 std::filesystem::path default_config_file_path() {
-    return mirage::runtime_default_config_file_path(
-        mirage::current_runtime_path_environment());
+    return mirage::runtime_default_config_file_path(mirage::current_runtime_path_environment());
 }
 
 std::filesystem::path pid_file_path() {
@@ -133,8 +136,8 @@ std::filesystem::path identity_key_path(const mirage::config& cfg) {
     return mirage::runtime_identity_key_path(cfg, mirage::current_runtime_path_environment());
 }
 
-void log_receiver_identity_key_result(
-    const std::filesystem::path& path, const mirage::receiver_identity_keypair& identity) {
+void log_receiver_identity_key_result(const std::filesystem::path& path,
+                                      const mirage::receiver_identity_keypair& identity) {
     for (const auto& warning : identity.warnings) {
         mirage::log::warn("{}", warning);
     }
@@ -297,9 +300,8 @@ int handle_doctor(int argc, char* argv[]) {
         std::println("{}", line);
     }
 
-    auto enabled_count = std::ranges::count_if(sources, [](const auto& source) {
-        return source.enabled;
-    });
+    auto enabled_count =
+        std::ranges::count_if(sources, [](const auto& source) { return source.enabled; });
     if (enabled_count == 0) {
         ok = false;
         std::println("check: no receiver protocols enabled");
@@ -499,25 +501,623 @@ bool clear_stale_runtime_before_daemon() {
     return true;
 }
 
+using started_callback = void (*)();
+
+int run_receiver(const mirage::runtime_cli_options& parsed, bool owns_runtime_files,
+                 bool show_stop_hint, started_callback on_started = nullptr);
+
 #ifdef _WIN32
-bool daemonize() {
+std::wstring widen_utf8(std::string_view input) {
+    if (input.empty()) {
+        return {};
+    }
+    if (input.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        return {};
+    }
+    const int input_size = static_cast<int>(input.size());
+    const int size =
+        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, input.data(), input_size, nullptr, 0);
+    if (size <= 0) {
+        return {};
+    }
+    std::wstring output(static_cast<size_t>(size), L'\0');
+    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, input.data(), input_size, output.data(),
+                        size);
+    return output;
+}
+
+std::string narrow_utf8(std::wstring_view input) {
+    if (input.empty()) {
+        return {};
+    }
+    if (input.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        return {};
+    }
+    const int input_size = static_cast<int>(input.size());
+    const int size =
+        WideCharToMultiByte(CP_UTF8, 0, input.data(), input_size, nullptr, 0, nullptr, nullptr);
+    if (size <= 0) {
+        return {};
+    }
+    std::string output(static_cast<size_t>(size), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, input.data(), input_size, output.data(), size, nullptr,
+                        nullptr);
+    return output;
+}
+
+std::string windows_error_message(DWORD error) {
+    LPWSTR buffer = nullptr;
+    const DWORD flags =
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS;
+    const DWORD size =
+        FormatMessageW(flags, nullptr, error, 0, reinterpret_cast<LPWSTR>(&buffer), 0, nullptr);
+    if (size == 0 || buffer == nullptr) {
+        return std::format("windows error {}", error);
+    }
+    std::wstring_view message(buffer, size);
+    while (!message.empty() && (message.back() == L'\r' || message.back() == L'\n' ||
+                                message.back() == L' ' || message.back() == L'\t')) {
+        message.remove_suffix(1);
+    }
+    auto text = narrow_utf8(message);
+    LocalFree(buffer);
+    return text.empty() ? std::format("windows error {}", error) : text;
+}
+
+std::optional<std::wstring> windows_executable_path() {
+    std::wstring buffer(MAX_PATH, L'\0');
+    for (;;) {
+        const DWORD size =
+            GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (size == 0) {
+            return std::nullopt;
+        }
+        if (static_cast<size_t>(size) < buffer.size()) {
+            buffer.resize(static_cast<size_t>(size));
+            return buffer;
+        }
+        buffer.resize(buffer.size() * 2);
+    }
+}
+
+std::wstring quote_windows_arg(std::wstring_view arg) {
+    std::wstring quoted = L"\"";
+    size_t backslashes = 0;
+    for (wchar_t ch : arg) {
+        if (ch == L'\\') {
+            ++backslashes;
+            continue;
+        }
+        if (ch == L'"') {
+            quoted.append(backslashes * 2 + 1, L'\\');
+            quoted.push_back(ch);
+            backslashes = 0;
+            continue;
+        }
+        quoted.append(backslashes, L'\\');
+        backslashes = 0;
+        quoted.push_back(ch);
+    }
+    quoted.append(backslashes * 2, L'\\');
+    quoted.push_back(L'"');
+    return quoted;
+}
+
+bool redirect_windows_output_to_log() {
+    auto dir = state_dir();
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if (ec) {
+        return false;
+    }
+    auto log_path = dir / "mirage.log";
+    FILE* stderr_file = nullptr;
+    FILE* stdout_file = nullptr;
+    _wfreopen_s(&stderr_file, log_path.c_str(), L"a", stderr);
+    _wfreopen_s(&stdout_file, log_path.c_str(), L"a", stdout);
+    return stderr_file != nullptr || stdout_file != nullptr;
+}
+
+bool daemonize_child() {
     if (!clear_stale_runtime_before_daemon()) {
         return false;
     }
-    auto dir = state_dir();
-    std::filesystem::create_directories(dir);
     FreeConsole();
+    redirect_windows_output_to_log();
     if (!write_runtime_pid_or_report(mirage::current_process_id())) {
         return false;
     }
-
-    auto log_path = dir / "mirage.log";
-    FILE* log_file = nullptr;
-    _wfreopen_s(&log_file, log_path.c_str(), L"a", stderr);
-
     std::println(stderr, "mirage started as background process (pid {})",
                  mirage::current_process_id());
     return true;
+}
+
+bool daemonize_parent(int argc, char* argv[]) {
+    if (!clear_stale_runtime_before_daemon()) {
+        return false;
+    }
+    auto exe = windows_executable_path();
+    if (!exe) {
+        std::println(stderr, "could not find mirage executable path: {}",
+                     windows_error_message(GetLastError()));
+        return false;
+    }
+
+    std::wstring command = quote_windows_arg(*exe);
+    bool replaced_daemon_flag = false;
+    for (int i = 1; i < argc; ++i) {
+        std::string_view arg(argv[i]);
+        if (!replaced_daemon_flag && (arg == "--daemon" || arg == "-d")) {
+            command += L" ";
+            command += quote_windows_arg(L"--background-child");
+            replaced_daemon_flag = true;
+            continue;
+        }
+        command += L" ";
+        command += quote_windows_arg(widen_utf8(arg));
+    }
+    if (!replaced_daemon_flag) {
+        command += L" ";
+        command += quote_windows_arg(L"--background-child");
+    }
+
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    std::vector<wchar_t> mutable_command(command.begin(), command.end());
+    mutable_command.push_back(L'\0');
+    const DWORD flags = DETACHED_PROCESS | CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP;
+    if (!CreateProcessW(nullptr, mutable_command.data(), nullptr, nullptr, FALSE, flags, nullptr,
+                        nullptr, &startup, &process)) {
+        std::println(stderr, "could not start mirage in background: {}",
+                     windows_error_message(GetLastError()));
+        return false;
+    }
+    const int child_pid = static_cast<int>(process.dwProcessId);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    if (!write_runtime_pid_or_report(child_pid)) {
+        return false;
+    }
+    std::println(stderr, "mirage started (pid {})", child_pid);
+    return true;
+}
+
+constexpr wchar_t windows_service_name[] = L"mirage";
+constexpr wchar_t windows_service_display_name[] = L"Mirage Receiver";
+
+struct service_handle {
+    SC_HANDLE value = nullptr;
+
+    service_handle() = default;
+    explicit service_handle(SC_HANDLE handle) : value(handle) {}
+    service_handle(const service_handle&) = delete;
+    service_handle& operator=(const service_handle&) = delete;
+    service_handle(service_handle&& other) noexcept : value(std::exchange(other.value, nullptr)) {}
+    service_handle& operator=(service_handle&& other) noexcept {
+        if (this != &other) {
+            reset(std::exchange(other.value, nullptr));
+        }
+        return *this;
+    }
+    ~service_handle() { reset(); }
+
+    void reset(SC_HANDLE handle = nullptr) {
+        if (value != nullptr) {
+            CloseServiceHandle(value);
+        }
+        value = handle;
+    }
+};
+
+std::vector<std::string> windows_service_runtime_args;
+SERVICE_STATUS_HANDLE windows_service_status_handle = nullptr;
+SERVICE_STATUS windows_service_status{};
+DWORD windows_service_checkpoint = 1;
+
+std::vector<std::string_view> service_arg_views(const std::vector<std::string>& args) {
+    std::vector<std::string_view> views;
+    views.reserve(args.size());
+    for (const auto& arg : args) {
+        views.emplace_back(arg);
+    }
+    return views;
+}
+
+void print_windows_service_usage() {
+    std::println(stderr, "usage:");
+    std::println(stderr, "  mirage service install [runtime options]");
+    std::println(stderr, "  mirage service start");
+    std::println(stderr, "  mirage service stop");
+    std::println(stderr, "  mirage service status");
+    std::println(stderr, "  mirage service uninstall");
+    std::println(stderr, "");
+    std::println(stderr, "service install stores the runtime options in the windows service.");
+    std::println(stderr, "run from an elevated powershell when installing or uninstalling.");
+}
+
+bool runtime_args_include_daemon(std::span<const std::string_view> args) {
+    return std::ranges::any_of(args, [](std::string_view arg) {
+        return arg == "--daemon" || arg == "-d" || arg == "--background-child";
+    });
+}
+
+std::wstring service_binary_command(std::span<const std::string_view> runtime_args) {
+    auto exe = windows_executable_path();
+    if (!exe) {
+        return {};
+    }
+    std::wstring command = quote_windows_arg(*exe);
+    command += L" ";
+    command += quote_windows_arg(L"service");
+    command += L" ";
+    command += quote_windows_arg(L"run");
+    for (auto arg : runtime_args) {
+        command += L" ";
+        command += quote_windows_arg(widen_utf8(arg));
+    }
+    return command;
+}
+
+service_handle open_service_control_manager(DWORD access) {
+    return service_handle(OpenSCManagerW(nullptr, nullptr, access));
+}
+
+service_handle open_mirage_service(SC_HANDLE scm, DWORD access) {
+    return service_handle(OpenServiceW(scm, windows_service_name, access));
+}
+
+std::string service_state_name(DWORD state) {
+    switch (state) {
+        case SERVICE_STOPPED:
+            return "stopped";
+        case SERVICE_START_PENDING:
+            return "starting";
+        case SERVICE_STOP_PENDING:
+            return "stopping";
+        case SERVICE_RUNNING:
+            return "running";
+        case SERVICE_CONTINUE_PENDING:
+            return "continue pending";
+        case SERVICE_PAUSE_PENDING:
+            return "pause pending";
+        case SERVICE_PAUSED:
+            return "paused";
+        default:
+            return std::format("unknown ({})", state);
+    }
+}
+
+std::optional<SERVICE_STATUS_PROCESS> query_service_status(SC_HANDLE service) {
+    SERVICE_STATUS_PROCESS status{};
+    DWORD bytes_needed = 0;
+    if (!QueryServiceStatusEx(service, SC_STATUS_PROCESS_INFO, reinterpret_cast<LPBYTE>(&status),
+                              sizeof(status), &bytes_needed)) {
+        return std::nullopt;
+    }
+    return status;
+}
+
+bool wait_for_service_state(SC_HANDLE service, DWORD wanted_state, std::chrono::seconds timeout) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (std::chrono::steady_clock::now() < deadline) {
+        auto status = query_service_status(service);
+        if (!status) {
+            return false;
+        }
+        if (status->dwCurrentState == wanted_state) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+    auto status = query_service_status(service);
+    return status && status->dwCurrentState == wanted_state;
+}
+
+bool stop_windows_service_handle(SC_HANDLE service, bool quiet_if_stopped) {
+    auto status = query_service_status(service);
+    if (!status) {
+        std::println(stderr, "could not query windows service: {}",
+                     windows_error_message(GetLastError()));
+        return false;
+    }
+    if (status->dwCurrentState == SERVICE_STOPPED) {
+        if (!quiet_if_stopped) {
+            std::println(stderr, "mirage service is already stopped.");
+        }
+        return true;
+    }
+
+    SERVICE_STATUS stop_status{};
+    if (!ControlService(service, SERVICE_CONTROL_STOP, &stop_status)) {
+        const auto error = GetLastError();
+        if (error == ERROR_SERVICE_NOT_ACTIVE) {
+            return true;
+        }
+        std::println(stderr, "could not stop windows service: {}", windows_error_message(error));
+        return false;
+    }
+    if (!wait_for_service_state(service, SERVICE_STOPPED, std::chrono::seconds(15))) {
+        std::println(stderr, "mirage service did not stop within 15 seconds.");
+        return false;
+    }
+    if (!quiet_if_stopped) {
+        std::println(stderr, "mirage service stopped.");
+    }
+    return true;
+}
+
+int handle_windows_service_install(std::span<const std::string_view> runtime_args) {
+    if (runtime_args_include_daemon(runtime_args)) {
+        std::println(stderr, "service install does not accept --daemon.");
+        return 2;
+    }
+    auto parsed = mirage::parse_runtime_cli_options(runtime_args, default_config_file_path());
+    if (!parsed) {
+        print_cli_error(parsed.error());
+        return parsed.error().exit_code();
+    }
+
+    auto binary_command = service_binary_command(runtime_args);
+    if (binary_command.empty()) {
+        std::println(stderr, "could not find mirage executable path: {}",
+                     windows_error_message(GetLastError()));
+        return 1;
+    }
+
+    auto scm = open_service_control_manager(SC_MANAGER_CREATE_SERVICE | SC_MANAGER_CONNECT);
+    if (scm.value == nullptr) {
+        const auto error = GetLastError();
+        std::println(stderr, "could not open windows service manager: {}",
+                     windows_error_message(error));
+        if (error == ERROR_ACCESS_DENIED) {
+            std::println(stderr, "run this command from an elevated powershell.");
+        }
+        return 1;
+    }
+
+    auto service = service_handle(CreateServiceW(
+        scm.value, windows_service_name, windows_service_display_name, SERVICE_ALL_ACCESS,
+        SERVICE_WIN32_OWN_PROCESS, SERVICE_AUTO_START, SERVICE_ERROR_NORMAL, binary_command.c_str(),
+        nullptr, nullptr, nullptr, nullptr, nullptr));
+    if (service.value != nullptr) {
+        std::println(stderr, "mirage service installed.");
+        return 0;
+    }
+
+    const auto create_error = GetLastError();
+    if (create_error != ERROR_SERVICE_EXISTS) {
+        std::println(stderr, "could not install windows service: {}",
+                     windows_error_message(create_error));
+        if (create_error == ERROR_ACCESS_DENIED) {
+            std::println(stderr, "run this command from an elevated powershell.");
+        }
+        return 1;
+    }
+
+    service = open_mirage_service(scm.value, SERVICE_CHANGE_CONFIG);
+    if (service.value == nullptr) {
+        std::println(stderr, "could not open existing windows service: {}",
+                     windows_error_message(GetLastError()));
+        return 1;
+    }
+    if (!ChangeServiceConfigW(service.value, SERVICE_WIN32_OWN_PROCESS, SERVICE_AUTO_START,
+                              SERVICE_ERROR_NORMAL, binary_command.c_str(), nullptr, nullptr,
+                              nullptr, nullptr, nullptr, windows_service_display_name)) {
+        std::println(stderr, "could not update windows service: {}",
+                     windows_error_message(GetLastError()));
+        return 1;
+    }
+    std::println(stderr, "mirage service updated.");
+    return 0;
+}
+
+int handle_windows_service_start() {
+    auto scm = open_service_control_manager(SC_MANAGER_CONNECT);
+    if (scm.value == nullptr) {
+        std::println(stderr, "could not open windows service manager: {}",
+                     windows_error_message(GetLastError()));
+        return 1;
+    }
+    auto service = open_mirage_service(scm.value, SERVICE_START | SERVICE_QUERY_STATUS);
+    if (service.value == nullptr) {
+        std::println(stderr, "mirage service is not installed.");
+        return 1;
+    }
+    if (!StartServiceW(service.value, 0, nullptr)) {
+        const auto error = GetLastError();
+        if (error != ERROR_SERVICE_ALREADY_RUNNING) {
+            std::println(stderr, "could not start windows service: {}",
+                         windows_error_message(error));
+            return 1;
+        }
+    }
+    if (!wait_for_service_state(service.value, SERVICE_RUNNING, std::chrono::seconds(15))) {
+        std::println(stderr, "mirage service did not report running within 15 seconds.");
+        return 1;
+    }
+    std::println(stderr, "mirage service started.");
+    return 0;
+}
+
+int handle_windows_service_stop() {
+    auto scm = open_service_control_manager(SC_MANAGER_CONNECT);
+    if (scm.value == nullptr) {
+        std::println(stderr, "could not open windows service manager: {}",
+                     windows_error_message(GetLastError()));
+        return 1;
+    }
+    auto service = open_mirage_service(scm.value, SERVICE_STOP | SERVICE_QUERY_STATUS);
+    if (service.value == nullptr) {
+        std::println(stderr, "mirage service is not installed.");
+        return 1;
+    }
+    return stop_windows_service_handle(service.value, false) ? 0 : 1;
+}
+
+int handle_windows_service_status() {
+    auto scm = open_service_control_manager(SC_MANAGER_CONNECT);
+    if (scm.value == nullptr) {
+        std::println(stderr, "could not open windows service manager: {}",
+                     windows_error_message(GetLastError()));
+        return 1;
+    }
+    auto service = open_mirage_service(scm.value, SERVICE_QUERY_STATUS);
+    if (service.value == nullptr) {
+        std::println(stderr, "mirage service is not installed.");
+        return 1;
+    }
+    auto status = query_service_status(service.value);
+    if (!status) {
+        std::println(stderr, "could not query windows service: {}",
+                     windows_error_message(GetLastError()));
+        return 1;
+    }
+    std::println(stderr, "mirage service: {}", service_state_name(status->dwCurrentState));
+    if (status->dwProcessId != 0) {
+        std::println(stderr, "pid: {}", status->dwProcessId);
+    }
+    return 0;
+}
+
+int handle_windows_service_uninstall() {
+    auto scm = open_service_control_manager(SC_MANAGER_CONNECT);
+    if (scm.value == nullptr) {
+        std::println(stderr, "could not open windows service manager: {}",
+                     windows_error_message(GetLastError()));
+        return 1;
+    }
+    auto service = open_mirage_service(scm.value, DELETE | SERVICE_STOP | SERVICE_QUERY_STATUS);
+    if (service.value == nullptr) {
+        std::println(stderr, "mirage service is not installed.");
+        return 0;
+    }
+    if (!stop_windows_service_handle(service.value, true)) {
+        return 1;
+    }
+    if (!DeleteService(service.value)) {
+        std::println(stderr, "could not uninstall windows service: {}",
+                     windows_error_message(GetLastError()));
+        return 1;
+    }
+    std::println(stderr, "mirage service uninstalled.");
+    return 0;
+}
+
+void set_windows_service_status(DWORD state, DWORD win32_exit_code = NO_ERROR,
+                                DWORD wait_hint_ms = 0) {
+    if (windows_service_status_handle == nullptr) {
+        return;
+    }
+    windows_service_status.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
+    windows_service_status.dwCurrentState = state;
+    windows_service_status.dwWin32ExitCode = win32_exit_code;
+    windows_service_status.dwServiceSpecificExitCode = 0;
+    windows_service_status.dwWaitHint = wait_hint_ms;
+    windows_service_status.dwControlsAccepted =
+        state == SERVICE_RUNNING ? SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN : 0;
+    if (state == SERVICE_START_PENDING || state == SERVICE_STOP_PENDING) {
+        windows_service_status.dwCheckPoint = windows_service_checkpoint++;
+    } else {
+        windows_service_status.dwCheckPoint = 0;
+    }
+    SetServiceStatus(windows_service_status_handle, &windows_service_status);
+}
+
+void windows_service_started() {
+    set_windows_service_status(SERVICE_RUNNING);
+}
+
+void WINAPI windows_service_control_handler(DWORD control) {
+    if (control == SERVICE_CONTROL_STOP || control == SERVICE_CONTROL_SHUTDOWN) {
+        set_windows_service_status(SERVICE_STOP_PENDING, NO_ERROR, 15000);
+        signal_received = SIGTERM;
+    }
+}
+
+void WINAPI windows_service_main(DWORD, LPWSTR*) {
+    windows_service_status_handle =
+        RegisterServiceCtrlHandlerW(windows_service_name, windows_service_control_handler);
+    if (windows_service_status_handle == nullptr) {
+        return;
+    }
+    windows_service_checkpoint = 1;
+    set_windows_service_status(SERVICE_START_PENDING, NO_ERROR, 15000);
+    redirect_windows_output_to_log();
+
+    auto views = service_arg_views(windows_service_runtime_args);
+    auto parsed = mirage::parse_runtime_cli_options(views, default_config_file_path());
+    if (!parsed) {
+        print_cli_error(parsed.error());
+        set_windows_service_status(SERVICE_STOPPED, ERROR_SERVICE_SPECIFIC_ERROR);
+        return;
+    }
+    if (parsed->daemon_mode) {
+        std::println(stderr, "service run does not accept --daemon.");
+        set_windows_service_status(SERVICE_STOPPED, ERROR_SERVICE_SPECIFIC_ERROR);
+        return;
+    }
+
+    setup_logging(parsed->verbose, parsed->debug, parsed->trace, parsed->diagnostics);
+    if (!claim_runtime_for_process(mirage::current_process_id())) {
+        set_windows_service_status(SERVICE_STOPPED, ERROR_SERVICE_SPECIFIC_ERROR);
+        return;
+    }
+    const int exit_code = run_receiver(*parsed, true, false, windows_service_started);
+    set_windows_service_status(SERVICE_STOPPED,
+                               exit_code == 0 ? NO_ERROR : ERROR_SERVICE_SPECIFIC_ERROR);
+}
+
+int run_windows_service_dispatcher(std::vector<std::string> runtime_args) {
+    windows_service_runtime_args = std::move(runtime_args);
+    SERVICE_TABLE_ENTRYW table[] = {
+        {const_cast<LPWSTR>(windows_service_name), windows_service_main},
+        {nullptr, nullptr},
+    };
+    if (!StartServiceCtrlDispatcherW(table)) {
+        const auto error = GetLastError();
+        std::println(stderr, "could not connect to windows service manager: {}",
+                     windows_error_message(error));
+        std::println(stderr, "use 'mirage service start' to start the installed service.");
+        return 1;
+    }
+    return 0;
+}
+
+int handle_service_command(int argc, char* argv[]) {
+    if (argc < 3 || std::string_view(argv[2]) == "--help" || std::string_view(argv[2]) == "-h") {
+        print_windows_service_usage();
+        return 0;
+    }
+
+    const std::string_view command(argv[2]);
+    if (command == "install") {
+        auto runtime_args = argv_view(argc, argv, 3);
+        return handle_windows_service_install(runtime_args);
+    }
+    if (command == "start") {
+        return handle_windows_service_start();
+    }
+    if (command == "stop") {
+        return handle_windows_service_stop();
+    }
+    if (command == "status") {
+        return handle_windows_service_status();
+    }
+    if (command == "uninstall") {
+        return handle_windows_service_uninstall();
+    }
+    if (command == "run") {
+        std::vector<std::string> runtime_args;
+        for (int i = 3; i < argc; ++i) {
+            runtime_args.emplace_back(argv[i]);
+        }
+        return run_windows_service_dispatcher(std::move(runtime_args));
+    }
+
+    std::println(stderr, "unknown service command: {}", command);
+    print_windows_service_usage();
+    return 2;
 }
 #else
 bool daemonize(pid_t& child_pid) {
@@ -566,71 +1166,29 @@ bool daemonize(pid_t& child_pid) {
     return true;
 }
 #endif
-}  // namespace
-int main(int argc, char* argv[]) {
-    if (argc > 1) {
-        std::string subcmd = argv[1];
-        if (subcmd == "stop") {
-            return handle_stop();
-        }
-        if (subcmd == "status") {
-            bool verbose = false;
-            for (int i = 2; i < argc; ++i) {
-                if (std::string(argv[i]) == "-v" || std::string(argv[i]) == "--verbose") {
-                    verbose = true;
-                }
-            }
-            return handle_status(verbose);
-        }
-        if (subcmd == "paths") {
-            return handle_paths(argc, argv);
-        }
-        if (subcmd == "doctor") {
-            return handle_doctor(argc, argv);
-        }
-    }
 
-    auto args = argv_view(argc, argv, 1);
-    for (auto arg : args) {
-        if (arg == "--help" || arg == "-h") {
-            print_help();
-            return 0;
-        }
-        if (arg == "--version" || arg == "-V") {
-            std::println("mirage {}", MIRAGE_VERSION);
-            return 0;
-        }
+#ifndef _WIN32
+int handle_service_command(int argc, char* argv[]) {
+    if (argc < 3 || std::string_view(argv[2]) == "--help" || std::string_view(argv[2]) == "-h") {
+        std::println(stderr, "usage:");
+        std::println(stderr, "  mirage service install [runtime options]");
+        std::println(stderr, "  mirage service start");
+        std::println(stderr, "  mirage service stop");
+        std::println(stderr, "  mirage service status");
+        std::println(stderr, "  mirage service uninstall");
+        std::println(stderr, "");
+        std::println(stderr, "windows service support is only available on windows.");
+        return 0;
     }
-
-    auto parsed = mirage::parse_runtime_cli_options(args, default_config_file_path());
-    if (!parsed) {
-        print_cli_error(parsed.error());
-        return parsed.error().exit_code();
-    }
-    const auto cfg = parsed->cfg;
-    setup_logging(parsed->verbose, parsed->debug, parsed->trace, parsed->diagnostics);
-
-    if (parsed->daemon_mode) {
-#ifdef _WIN32
-        if (!daemonize()) {
-            return 1;
-        }
-#else
-        pid_t child_pid = 0;
-        if (!daemonize(child_pid)) {
-            return 1;
-        }
+    std::println(stderr, "windows service support is only available on windows.");
+    return 1;
+}
 #endif
-        setup_logging(parsed->verbose, parsed->debug, parsed->trace, parsed->diagnostics);
-    }
-    bool owns_runtime_files = parsed->daemon_mode;
-    if (!parsed->daemon_mode) {
-        if (!claim_runtime_for_process(mirage::current_process_id())) {
-            return 1;
-        }
-        owns_runtime_files = true;
-    }
 
+int run_receiver(const mirage::runtime_cli_options& parsed, bool owns_runtime_files,
+                 bool show_stop_hint, started_callback on_started) {
+    const auto& cfg = parsed.cfg;
+    signal_received = 0;
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
     try {
@@ -684,7 +1242,7 @@ int main(int argc, char* argv[]) {
         std::optional<mirage::discovery::mdns_service_publisher> mdns_publisher;
         mirage::discovery::disabled_service_publisher disabled_discovery;
         mirage::discovery::service_publisher* discovery = &disabled_discovery;
-        if (!parsed->no_mdns) {
+        if (!parsed.no_mdns) {
             mdns.emplace(ctx);
             mdns_publisher.emplace(*mdns);
             discovery = &*mdns_publisher;
@@ -774,8 +1332,11 @@ int main(int argc, char* argv[]) {
                 mirage::log::user("  {} enabled", mirage::protocol_id(source.id));
             }
         }
-        if (!parsed->daemon_mode) {
+        if (show_stop_hint) {
             mirage::log::user("  press ctrl+c to stop.");
+        }
+        if (on_started != nullptr) {
+            on_started();
         }
         while (signal_received == 0) {
             ctx.run_for(std::chrono::milliseconds(100));
@@ -802,4 +1363,81 @@ int main(int argc, char* argv[]) {
     }
     mirage::log::info("stopped");
     return 0;
+}
+}  // namespace
+int main(int argc, char* argv[]) {
+    if (argc > 1) {
+        std::string subcmd = argv[1];
+        if (subcmd == "stop") {
+            return handle_stop();
+        }
+        if (subcmd == "status") {
+            bool verbose = false;
+            for (int i = 2; i < argc; ++i) {
+                if (std::string(argv[i]) == "-v" || std::string(argv[i]) == "--verbose") {
+                    verbose = true;
+                }
+            }
+            return handle_status(verbose);
+        }
+        if (subcmd == "paths") {
+            return handle_paths(argc, argv);
+        }
+        if (subcmd == "doctor") {
+            return handle_doctor(argc, argv);
+        }
+        if (subcmd == "service") {
+            return handle_service_command(argc, argv);
+        }
+    }
+
+    auto args = argv_view(argc, argv, 1);
+    for (auto arg : args) {
+        if (arg == "--help" || arg == "-h") {
+            print_help();
+            return 0;
+        }
+        if (arg == "--version" || arg == "-V") {
+            std::println("mirage {}", MIRAGE_VERSION);
+            return 0;
+        }
+    }
+
+    auto parsed = mirage::parse_runtime_cli_options(args, default_config_file_path());
+    if (!parsed) {
+        print_cli_error(parsed.error());
+        return parsed.error().exit_code();
+    }
+    setup_logging(parsed->verbose, parsed->debug, parsed->trace, parsed->diagnostics);
+
+#ifdef _WIN32
+    if (parsed->background_child_mode) {
+        if (!daemonize_child()) {
+            return 1;
+        }
+        setup_logging(parsed->verbose, parsed->debug, parsed->trace, parsed->diagnostics);
+        return run_receiver(*parsed, true, false);
+    }
+    if (parsed->daemon_mode) {
+        return daemonize_parent(argc, argv) ? 0 : 1;
+    }
+#else
+    if (parsed->daemon_mode) {
+        pid_t child_pid = 0;
+        if (!daemonize(child_pid)) {
+            return 1;
+        }
+        setup_logging(parsed->verbose, parsed->debug, parsed->trace, parsed->diagnostics);
+    }
+#endif
+
+    bool owns_runtime_files = parsed->daemon_mode;
+    if (!parsed->daemon_mode) {
+        if (!claim_runtime_for_process(mirage::current_process_id())) {
+            return 1;
+        }
+        owns_runtime_files = true;
+    }
+
+    return run_receiver(*parsed, owns_runtime_files, !parsed->daemon_mode);
 }

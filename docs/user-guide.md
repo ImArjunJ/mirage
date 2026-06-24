@@ -47,6 +47,13 @@ mirage --diagnostics
 
 open a new terminal after using `-AddToPath`.
 
+optional windows service install, from an elevated powershell:
+
+```powershell
+.\install.ps1 -AddToPath -InstallService -StartService
+mirage service status
+```
+
 the package installer copies the binary, shaders, and docs into a user-writable
 prefix. on linux the default is `~/.local`; on windows it is
 `%LOCALAPPDATA%\Programs\mirage`.
@@ -152,11 +159,42 @@ rendering problems.
 
 ## daily use
 
+foreground:
+
+```sh
+mirage
+```
+
+linux background process:
+
 ```sh
 mirage --daemon
 mirage status -v
 mirage stop
+```
+
+windows service, from an elevated powershell:
+
+```powershell
+mirage service install
+mirage service start
+mirage service status
+mirage service stop
+mirage service uninstall
+```
+
+other useful commands:
+
+```sh
 mirage paths
+```
+
+the windows service runs under the service account, so its default state and
+config paths can differ from a normal terminal. use an explicit config path if
+you want predictable service config:
+
+```powershell
+mirage service install --config C:\ProgramData\mirage\config.conf
 ```
 
 use a persistent identity key if you do not want clients to see a fresh receiver

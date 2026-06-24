@@ -10,6 +10,7 @@ miracast / wi-fi display.
 - airplay mirroring and audio work on the tested ios + linux path
 - cast and miracast are experimental foundations, not complete media receivers
 - windows builds in ci; runtime testing is early
+- linux daemon mode and windows service commands are available
 - protected content is not supported
 
 ## install
@@ -43,6 +44,14 @@ mirage --diagnostics
 mirage status -v
 mirage paths
 mirage stop
+```
+
+windows service, from an elevated powershell:
+
+```powershell
+mirage service install
+mirage service start
+mirage service status
 ```
 
 ## config

@@ -16,9 +16,7 @@ struct cli_error {
     cli_error_kind kind = cli_error_kind::usage;
     std::string message;
 
-    [[nodiscard]] int exit_code() const {
-        return kind == cli_error_kind::usage ? 2 : 1;
-    }
+    [[nodiscard]] int exit_code() const { return kind == cli_error_kind::usage ? 2 : 1; }
 };
 
 template <typename T>
@@ -35,6 +33,7 @@ struct runtime_cli_options {
     bool diagnostics = false;
     bool no_mdns = false;
     bool daemon_mode = false;
+    bool background_child_mode = false;
 };
 
 struct paths_cli_options {
@@ -42,8 +41,7 @@ struct paths_cli_options {
     bool explicit_config = false;
 };
 
-[[nodiscard]] cli_result<uint16_t> parse_cli_port(std::string_view option,
-                                                  std::string_view value);
+[[nodiscard]] cli_result<uint16_t> parse_cli_port(std::string_view option, std::string_view value);
 [[nodiscard]] bool runtime_option_takes_value(std::string_view option);
 [[nodiscard]] cli_result<runtime_cli_options> parse_runtime_cli_options(
     std::span<const std::string_view> args, const std::filesystem::path& default_config_path);

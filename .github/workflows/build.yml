@@ -76,6 +76,7 @@ jobs:
           ./build/Release/mirage.exe paths
           ./build/Release/mirage.exe doctor --no-mdns
           ./build/Release/mirage.exe status
+          ./build/Release/mirage.exe service --help
           ctest --test-dir build -C Release --output-on-failure
           cmake --install build --config Release --prefix install-smoke
           if (!(Test-Path install-smoke/bin/mirage.exe)) { throw "installed mirage.exe missing" }
