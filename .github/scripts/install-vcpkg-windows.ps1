@@ -30,7 +30,7 @@ function Write-DirectoryStats {
     )
 
     if (!(Test-Path $Path)) {
-        Write-Host "$Label: missing ($Path)"
+        Write-Host "${Label}: missing ($Path)"
         return
     }
 
@@ -42,7 +42,7 @@ function Write-DirectoryStats {
         $bytes = $stats.Sum
     }
 
-    Write-Host "$Label: $count files, $(Format-Bytes $bytes) ($Path)"
+    Write-Host "${Label}: $count files, $(Format-Bytes $bytes) ($Path)"
 }
 
 $workspace = $env:GITHUB_WORKSPACE
