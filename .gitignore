@@ -5,7 +5,8 @@ dist/
 cmake-build-*/
 ref/
 .cache/
-docs/
+docs/*
+!docs/user-guide.md
 
 # IDE
 .idea/
