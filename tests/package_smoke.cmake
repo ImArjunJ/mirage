@@ -66,6 +66,8 @@ list(GET package_roots 0 package_root)
 set(package_binary "${package_root}/bin/${executable_name}")
 set(vertex_shader "${package_root}/share/mirage/shaders/nv12_to_rgb.vert.spv")
 set(fragment_shader "${package_root}/share/mirage/shaders/nv12_to_rgb.frag.spv")
+set(package_install_sh "${package_root}/install.sh")
+set(package_install_ps1 "${package_root}/install.ps1")
 
 if(NOT EXISTS "${package_binary}")
     message(FATAL_ERROR "packaged binary missing: ${package_binary}")
@@ -75,6 +77,52 @@ if(NOT EXISTS "${vertex_shader}")
 endif()
 if(NOT EXISTS "${fragment_shader}")
     message(FATAL_ERROR "packaged fragment shader missing: ${fragment_shader}")
+endif()
+if(NOT EXISTS "${package_install_sh}")
+    message(FATAL_ERROR "packaged install.sh missing: ${package_install_sh}")
+endif()
+if(NOT EXISTS "${package_install_ps1}")
+    message(FATAL_ERROR "packaged install.ps1 missing: ${package_install_ps1}")
+endif()
+
+set(package_install_prefix "${package_dir}/package-install")
+if(WIN32)
+    find_program(POWERSHELL_EXECUTABLE pwsh powershell REQUIRED)
+    execute_process(
+        COMMAND "${POWERSHELL_EXECUTABLE}" -NoProfile -ExecutionPolicy Bypass
+                -File "${package_install_ps1}"
+                -Prefix "${package_install_prefix}"
+        RESULT_VARIABLE package_install_result
+        OUTPUT_VARIABLE package_install_stdout
+        ERROR_VARIABLE package_install_stderr
+    )
+else()
+    execute_process(
+        COMMAND sh "${package_install_sh}" --prefix "${package_install_prefix}"
+        RESULT_VARIABLE package_install_result
+        OUTPUT_VARIABLE package_install_stdout
+        ERROR_VARIABLE package_install_stderr
+    )
+endif()
+if(NOT package_install_result EQUAL 0)
+    message(FATAL_ERROR
+        "package installer failed (${package_install_result})\n"
+        "${package_install_stdout}\n${package_install_stderr}")
+endif()
+
+set(installer_binary "${package_install_prefix}/bin/${executable_name}")
+set(installer_vertex_shader
+    "${package_install_prefix}/share/mirage/shaders/nv12_to_rgb.vert.spv")
+set(installer_fragment_shader
+    "${package_install_prefix}/share/mirage/shaders/nv12_to_rgb.frag.spv")
+if(NOT EXISTS "${installer_binary}")
+    message(FATAL_ERROR "installer binary missing: ${installer_binary}")
+endif()
+if(NOT EXISTS "${installer_vertex_shader}")
+    message(FATAL_ERROR "installer vertex shader missing: ${installer_vertex_shader}")
+endif()
+if(NOT EXISTS "${installer_fragment_shader}")
+    message(FATAL_ERROR "installer fragment shader missing: ${installer_fragment_shader}")
 endif()
 
 set(smoke_state "${package_dir}/state")
@@ -108,4 +156,29 @@ endif()
 string(FIND "${doctor_stdout}" "result: ready" ready_pos)
 if(ready_pos EQUAL -1)
     message(FATAL_ERROR "packaged doctor did not report ready\n${doctor_stdout}")
+endif()
+
+set(installer_smoke_state "${package_dir}/installer-state")
+set(installer_smoke_config "${package_dir}/installer-config")
+file(MAKE_DIRECTORY "${installer_smoke_state}" "${installer_smoke_config}")
+
+execute_process(
+    COMMAND "${CMAKE_COMMAND}" -E env
+            "XDG_CONFIG_HOME=${installer_smoke_config}"
+            "XDG_STATE_HOME=${installer_smoke_state}"
+            "${installer_binary}" doctor --no-mdns --port 0
+    RESULT_VARIABLE installer_doctor_result
+    OUTPUT_VARIABLE installer_doctor_stdout
+    ERROR_VARIABLE installer_doctor_stderr
+)
+if(NOT installer_doctor_result EQUAL 0)
+    message(FATAL_ERROR
+        "installer doctor failed (${installer_doctor_result})\n"
+        "${installer_doctor_stdout}\n${installer_doctor_stderr}")
+endif()
+
+string(FIND "${installer_doctor_stdout}" "result: ready" installer_ready_pos)
+if(installer_ready_pos EQUAL -1)
+    message(FATAL_ERROR
+        "installer doctor did not report ready\n${installer_doctor_stdout}")
 endif()

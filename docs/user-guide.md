@@ -6,32 +6,83 @@ the main tested path is ios to linux.
 cast and miracast are present so the receiver core can grow in that direction,
 but they should be treated as experimental for now.
 
-## requirements
+## runtime requirements
 
-- c++23 compiler
-- cmake 3.25+
-- openssl
-- ffmpeg libraries
+- openssl runtime libraries
+- ffmpeg runtime libraries
 - vulkan runtime
-- `glslc`
 - pulseaudio or pipewire-pulse for audio output on linux
 
-on arch linux, the useful starting point is:
+on arch linux, the useful runtime packages are:
+
+```sh
+sudo pacman -S openssl ffmpeg vulkan-loader
+```
+
+package names differ by distro.
+
+## install from a package
+
+download and extract a release zip for your platform.
+
+linux:
+
+```sh
+unzip mirage-*.zip
+cd mirage-*
+./install.sh
+mirage doctor
+mirage --diagnostics
+```
+
+windows powershell:
+
+```powershell
+Expand-Archive .\mirage-*.zip
+cd .\mirage-*
+.\install.ps1 -AddToPath
+mirage doctor
+mirage --diagnostics
+```
+
+open a new terminal after using `-AddToPath`.
+
+the package installer copies the binary, shaders, and docs into a user-writable
+prefix. on linux the default is `~/.local`; on windows it is
+`%LOCALAPPDATA%\Programs\mirage`.
+
+## install from source
+
+the source-tree installer builds release mode and installs to `~/.local`:
+
+```sh
+./scripts/install.sh
+mirage doctor
+mirage --diagnostics
+```
+
+use a custom prefix when needed:
+
+```sh
+./scripts/install.sh --prefix /opt/mirage
+```
+
+source builds need a c++23 compiler, cmake 3.25+, vulkan headers, and `glslc`.
+
+on arch linux:
 
 ```sh
 sudo pacman -S cmake ninja clang openssl ffmpeg vulkan-headers vulkan-loader shaderc
 ```
 
-package names differ by distro.
-
-## build
+## developer build
 
 ```sh
 cmake --preset dev
 cmake --build --preset dev
 ```
 
-manual build:
+plain cmake:
 
 ```sh
 cmake -B build
@@ -49,13 +100,13 @@ cmake --install build --prefix ~/.local
 run the environment check:
 
 ```sh
-./build/mirage doctor
+mirage doctor
 ```
 
 start with diagnostics the first time:
 
 ```sh
-./build/mirage --diagnostics
+mirage --diagnostics
 ```
 
 from an iphone or ipad on the same local network, open airplay and choose
@@ -71,7 +122,7 @@ a healthy session prints summaries like:
 after the first successful run, plain mode is enough:
 
 ```sh
-./build/mirage
+mirage
 ```
 
 ## config
@@ -102,17 +153,17 @@ rendering problems.
 ## daily use
 
 ```sh
-./build/mirage --daemon
-./build/mirage status -v
-./build/mirage stop
-./build/mirage paths
+mirage --daemon
+mirage status -v
+mirage stop
+mirage paths
 ```
 
 use a persistent identity key if you do not want clients to see a fresh receiver
 identity after every rebuild:
 
 ```sh
-./build/mirage --identity-key ~/.config/mirage/identity.key
+mirage --identity-key ~/.config/mirage/identity.key
 ```
 
 ## network notes
@@ -122,7 +173,7 @@ wifi or ethernet segment.
 
 if the receiver does not appear:
 
-- run `./build/mirage doctor`
+- run `mirage doctor`
 - make sure multicast dns is allowed on udp 5353
 - allow mirage through the local firewall
 - avoid guest wifi networks that isolate devices
@@ -136,7 +187,7 @@ network, not only tcp 7000.
 
 receiver appears but video does not open:
 
-- run `./build/mirage --diagnostics`
+- run `mirage --diagnostics`
 - set `hardware_decode = false`
 - confirm vulkan is installed and the gpu driver is working
 - try `--debug` only when you need detailed logs
@@ -151,7 +202,7 @@ receiver does not appear:
 
 - confirm both devices are on the same local network
 - check firewall and multicast dns
-- run `./build/mirage --no-mdns` only if another discovery service is handling ads
+- run `mirage --no-mdns` only if another discovery service is handling ads
 
 protected video from streaming services is not supported.
 
@@ -162,6 +213,6 @@ include:
 - operating system and version
 - sender device and os version
 - command used to start mirage
-- output from `./build/mirage doctor`
-- diagnostics summaries from `./build/mirage --diagnostics`
+- output from `mirage doctor`
+- diagnostics summaries from `mirage --diagnostics`
 - whether mirroring, audio-only, cast, or miracast was being tested

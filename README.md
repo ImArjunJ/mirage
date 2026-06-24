@@ -12,13 +12,23 @@ miracast / wi-fi display.
 - windows builds in ci; runtime testing is early
 - protected content is not supported
 
-## quick start
+## install
+
+from source:
 
 ```sh
-cmake --preset dev
-cmake --build --preset dev
-./build/mirage doctor
-./build/mirage --diagnostics
+./scripts/install.sh
+mirage doctor
+mirage --diagnostics
+```
+
+from a release zip:
+
+```sh
+unzip mirage-*.zip
+cd mirage-*
+./install.sh
+mirage --diagnostics
 ```
 
 then connect from airplay on the same local network.
@@ -28,11 +38,11 @@ full setup and troubleshooting: [docs/user-guide.md](docs/user-guide.md)
 ## common commands
 
 ```sh
-./build/mirage
-./build/mirage --diagnostics
-./build/mirage status -v
-./build/mirage paths
-./build/mirage stop
+mirage
+mirage --diagnostics
+mirage status -v
+mirage paths
+mirage stop
 ```
 
 ## config

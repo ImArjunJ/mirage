@@ -251,6 +251,8 @@ endif()
 install(FILES ${SHADER_OUTPUTS} DESTINATION ${MIRAGE_INSTALL_SHADER_DIR})
 install(FILES README.md LICENSE DESTINATION ${CMAKE_INSTALL_DOCDIR})
 install(FILES docs/user-guide.md DESTINATION ${CMAKE_INSTALL_DOCDIR}/docs)
+install(PROGRAMS packaging/install.sh DESTINATION .)
+install(FILES packaging/install.ps1 DESTINATION .)
 
 set(CPACK_PACKAGE_NAME "mirage")
 set(CPACK_PACKAGE_VENDOR "mirage")
