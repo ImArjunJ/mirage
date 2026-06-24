@@ -148,6 +148,11 @@ def recv_exact(sock, count):
     return bytes(data)
 
 
+def recv_frame(sock):
+    length = struct.unpack(">I", recv_exact(sock, 4))[0]
+    return recv_exact(sock, length)
+
+
 with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as sock:
     wait_status_contains(
         '"protocol":"cast"',
@@ -287,6 +292,33 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
         '"health":"attention"',
         '"reason":"loaded_no_renderer:cast song"',
     )
+
+    with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as second:
+        second.sendall(
+            cast_message(
+                "urn:x-cast:com.google.cast.tp.connection",
+                '{"type":"CONNECT"}',
+            )
+            + cast_message(
+                "urn:x-cast:com.google.cast.receiver",
+                '{"type":"GET_STATUS","requestId":81}',
+            )
+            + cast_message(
+                "urn:x-cast:com.google.cast.media",
+                '{"type":"GET_STATUS","requestId":82}',
+            )
+        )
+        shared_receiver = recv_frame(second)
+        assert b"RECEIVER_STATUS" in shared_receiver
+        assert b'"appId":"CC1AD845"' in shared_receiver
+        assert b'"transportId":"web-1"' in shared_receiver
+        assert b'"requestId":81' in shared_receiver
+
+        shared_media = recv_frame(second)
+        assert b"MEDIA_STATUS" in shared_media
+        assert b'"mediaSessionId":1' in shared_media
+        assert b'"title":"cast song"' in shared_media
+        assert b'"requestId":82' in shared_media
 
     sock.sendall(
         cast_message(
