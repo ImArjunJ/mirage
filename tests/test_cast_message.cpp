@@ -150,6 +150,35 @@ int main() {
         ok &= expect(state.default_media_running, "launch state mismatch");
     }
 
+    channel_message wrong_session_stop{
+        .protocol_version = 0,
+        .source_id = "sender-4",
+        .destination_id = "receiver-0",
+        .namespace_ = std::string(namespace_receiver),
+        .payload_type = channel_payload_type::string_payload,
+        .payload_utf8 = "{\"type\":\"STOP\",\"requestId\":20,\"sessionId\":\"other-session\"}",
+        .payload_binary = {},
+    };
+    auto wrong_session_stop_result =
+        handle_channel_message_result(wrong_session_stop, "Living Room", state);
+    auto& wrong_session_stop_response = wrong_session_stop_result.responses;
+    ok &= expect(wrong_session_stop_response.size() == 1,
+                 "wrong receiver stop response count mismatch");
+    if (!wrong_session_stop_response.empty()) {
+        ok &= expect(contains(wrong_session_stop_response.front().payload_utf8,
+                              "\"type\":\"RECEIVER_STATUS\""),
+                     "wrong receiver stop status type mismatch");
+        ok &= expect(contains(wrong_session_stop_response.front().payload_utf8,
+                              "\"sessionId\":\"default-media-session\""),
+                     "wrong receiver stop should keep default session");
+        ok &= expect(contains(wrong_session_stop_response.front().payload_utf8, "\"requestId\":20"),
+                     "wrong receiver stop request id mismatch");
+        ok &= expect(wrong_session_stop_result.activity.event == channel_event::none,
+                     "wrong receiver stop activity mismatch");
+        ok &=
+            expect(state.default_media_running, "wrong receiver stop should not stop default app");
+    }
+
     channel_message unknown_launch{
         .protocol_version = 0,
         .source_id = "sender-4",

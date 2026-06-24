@@ -13,6 +13,8 @@
 namespace mirage::protocols::cast {
 namespace {
 
+inline constexpr std::string_view default_media_session_id = "default-media-session";
+
 enum class wire_type : uint8_t {
     varint = 0,
     length_delimited = 2,
@@ -377,6 +379,11 @@ bool is_default_media_app(std::string_view app_id) {
     return app_id == default_media_app_id;
 }
 
+bool default_media_session_matches(std::string_view payload) {
+    auto session_id = extract_json_string(payload, "sessionId");
+    return !session_id || *session_id == default_media_session_id;
+}
+
 std::string launch_error_payload(std::optional<int64_t> request_id, std::string_view reason) {
     return std::format("{{\"type\":\"LAUNCH_ERROR\",\"reason\":\"{}\"{}}}", json_escape(reason),
                        request_id_fragment(request_id));
@@ -641,10 +648,11 @@ std::string receiver_status_payload(std::string_view device_name, std::optional<
             "[{{\"appId\":\"{}\","
             "\"displayName\":\"Default Media Receiver\","
             "\"namespaces\":[{{\"name\":\"{}\"}}],"
-            "\"sessionId\":\"default-media-session\","
+            "\"sessionId\":\"{}\","
             "\"statusText\":\"ready\","
             "\"transportId\":\"{}\"}}]",
-            default_media_app_id, namespace_media, default_media_transport_id);
+            default_media_app_id, namespace_media, default_media_session_id,
+            default_media_transport_id);
     }
     auto body = std::format(
         "{{\"type\":\"RECEIVER_STATUS\","
@@ -730,6 +738,13 @@ channel_message_result handle_channel_message_result(const channel_message& mess
     }
 
     if (message.namespace_ == namespace_receiver && *type == "STOP") {
+        if (state.default_media_running && !default_media_session_matches(message.payload_utf8)) {
+            result.responses.push_back(make_string_message(
+                message.source_id, namespace_receiver,
+                receiver_status_payload(
+                    device_name, extract_json_int(message.payload_utf8, "requestId"), state)));
+            return result;
+        }
         state.default_media_running = false;
         if (state.media_session_active) {
             clear_media_session(state);

@@ -201,7 +201,20 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     sock.sendall(
         cast_message(
             "urn:x-cast:com.google.cast.receiver",
-            '{"type":"SET_VOLUME","requestId":11,"volume":{"level":0.42,"muted":true}}',
+            '{"type":"STOP","requestId":4,"sessionId":"other-session"}',
+        )
+    )
+    length = struct.unpack(">I", recv_exact(sock, 4))[0]
+    response = recv_exact(sock, length)
+    assert b"RECEIVER_STATUS" in response
+    assert b'"appId":"CC1AD845"' in response
+    assert b'"sessionId":"default-media-session"' in response
+    assert b'"requestId":4' in response
+
+    sock.sendall(
+        cast_message(
+            "urn:x-cast:com.google.cast.receiver",
+            '{"type":"SET_VOLUME","requestId":5,"volume":{"level":0.42,"muted":true}}',
         )
     )
     length = struct.unpack(">I", recv_exact(sock, 4))[0]
@@ -209,7 +222,7 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     assert b"RECEIVER_STATUS" in response
     assert b'"level":0.42' in response
     assert b'"muted":true' in response
-    assert b'"requestId":11' in response
+    assert b'"requestId":5' in response
     wait_status_contains(
         '"protocol":"cast"',
         '"kind":"control"',
