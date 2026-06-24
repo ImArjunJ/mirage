@@ -22,12 +22,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake clang-18 libc++-18-dev libc++abi-18-dev libssl-dev libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libvulkan-dev glslc libx11-dev libva-dev
-      - name: locate vcpkg revision (windows)
-        id: vcpkg-rev
-        if: runner.os == 'Windows'
-        run: |
-          $rev = git -C "$env:VCPKG_INSTALLATION_ROOT" rev-parse HEAD
-          "rev=$rev" >> $env:GITHUB_OUTPUT
       - name: cache vcpkg (windows)
         if: runner.os == 'Windows'
         uses: actions/cache@v5
@@ -35,8 +29,8 @@ jobs:
           path: |
             ${{ github.workspace }}/vcpkg_installed
             ${{ github.workspace }}/.vcpkg-binary-cache
-          key: vcpkg-x64-windows-${{ steps.vcpkg-rev.outputs.rev }}-${{ hashFiles('vcpkg.json') }}
-          restore-keys: vcpkg-x64-windows-${{ steps.vcpkg-rev.outputs.rev }}-
+          key: vcpkg-x64-windows-${{ hashFiles('vcpkg.json') }}
+          restore-keys: vcpkg-x64-windows-
       - name: install deps (windows)
         if: runner.os == 'Windows'
         timeout-minutes: 90

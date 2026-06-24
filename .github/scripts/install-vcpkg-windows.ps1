@@ -57,6 +57,10 @@ New-Item -ItemType Directory -Force $cache | Out-Null
 $env:VCPKG_BINARY_SOURCES = "clear;files,$cache,readwrite"
 
 Write-Host "vcpkg root: $env:VCPKG_INSTALLATION_ROOT"
+$vcpkgRevision = git -C "$env:VCPKG_INSTALLATION_ROOT" rev-parse --short HEAD
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "vcpkg checkout: $vcpkgRevision"
+}
 Write-Host "workspace: $workspace"
 Write-Host "triplet: $Triplet"
 Write-Host "binary sources: $env:VCPKG_BINARY_SOURCES"
