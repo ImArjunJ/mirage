@@ -24,6 +24,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake clang-18 libc++-18-dev libc++abi-18-dev libssl-dev libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libvulkan-dev glslc libx11-dev libva-dev
       - name: cache vcpkg (windows)
+        id: cache-vcpkg
         if: runner.os == 'Windows'
         uses: actions/cache@v5
         with:
@@ -33,7 +34,7 @@ jobs:
           key: vcpkg-x64-windows-${{ hashFiles('vcpkg.json') }}
           restore-keys: vcpkg-x64-windows-
       - name: install deps (windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.cache-vcpkg.outputs.cache-hit != 'true'
         timeout-minutes: 90
         run: |
           .\.github\scripts\install-vcpkg-windows.ps1 -Triplet x64-windows
