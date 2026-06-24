@@ -87,8 +87,7 @@ probe_response handle_probe(std::string_view data, std::string_view device_name)
         auto body = std::format(
             "{{\"name\":\"{}\",\"receiver\":\"cast-v2\","
             "\"status\":\"app_media_ready\","
-            "\"detail\":\"cast app/media control channel is available; media rendering is not "
-            "implemented yet\"}}\n",
+            "\"detail\":\"cast app/media control channel is available; media renderer is enabled\"}}\n",
             json_escape(device_name));
         return {.kind = probe_kind::http_status,
                 .response = http_response(200, "OK", body, !is_head)};

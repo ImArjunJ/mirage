@@ -292,14 +292,16 @@ struct url_media_player::impl {
 
 namespace {
 
-void decode_audio_packet(AVCodecContext& ctx, SwrContext& swr, AVFrame& frame,
-                         const AVPacket& packet, audio::audio_player& player, int out_channels) {
+uint64_t decode_audio_packet(AVCodecContext& ctx, SwrContext& swr, AVFrame& frame,
+                             const AVPacket& packet, audio::audio_player* player,
+                             int out_channels) {
     int ret = avcodec_send_packet(&ctx, &packet);
     if (ret < 0 && ret != AVERROR(EAGAIN)) {
         log::warn("Cast media audio packet decode failed: {}", av_error_string(ret));
-        return;
+        return 0;
     }
 
+    uint64_t decoded_frames = 0;
     while (true) {
         ret = avcodec_receive_frame(&ctx, &frame);
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
@@ -328,21 +330,26 @@ void decode_audio_packet(AVCodecContext& ctx, SwrContext& swr, AVFrame& frame,
         }
 
         const size_t out_bytes = static_cast<size_t>(converted) * bytes_per_sample;
-        player.push_pcm(
-            std::span<const std::byte>(reinterpret_cast<const std::byte*>(pcm.data()), out_bytes));
+        if (player != nullptr) {
+            player->push_pcm(std::span<const std::byte>(
+                reinterpret_cast<const std::byte*>(pcm.data()), out_bytes));
+        }
+        ++decoded_frames;
         av_frame_unref(&frame);
     }
+    return decoded_frames;
 }
 
-void decode_video_packet(AVCodecContext& ctx, AVFrame& frame, const AVPacket& packet,
-                         const remote_media_load& request,
-                         std::unique_ptr<render::render_window>& renderer) {
+uint64_t decode_video_packet(AVCodecContext& ctx, AVFrame& frame, const AVPacket& packet,
+                             const remote_media_load& request,
+                             std::unique_ptr<render::render_window>& renderer) {
     int ret = avcodec_send_packet(&ctx, &packet);
     if (ret < 0 && ret != AVERROR(EAGAIN)) {
         log::warn("Cast media video packet decode failed: {}", av_error_string(ret));
-        return;
+        return 0;
     }
 
+    uint64_t decoded_frames = 0;
     while (true) {
         ret = avcodec_receive_frame(&ctx, &frame);
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
@@ -368,7 +375,9 @@ void decode_video_packet(AVCodecContext& ctx, AVFrame& frame, const AVPacket& pa
         if (renderer && renderer->is_open()) {
             renderer->submit_frame(std::move(*decoded));
         }
+        ++decoded_frames;
     }
+    return decoded_frames;
 }
 
 }  // namespace
@@ -436,6 +445,8 @@ void url_media_player::impl::run(remote_media_load request) {
             audio_output = audio::audio_player::create(audio_rate, audio_channels);
             if (audio_output) {
                 set_audio_player(audio_output.get());
+            } else {
+                log::warn("Cast media audio output unavailable; decoded PCM will be discarded");
             }
         }
     }
@@ -446,7 +457,7 @@ void url_media_player::impl::run(remote_media_load request) {
         video_ctx = open_decoder(*format->streams[video_stream]);
     }
 
-    const bool audio_ready = audio_output != nullptr && audio_ctx != nullptr && audio_swr != nullptr;
+    const bool audio_ready = audio_ctx != nullptr && audio_swr != nullptr;
     const bool video_ready = video_ctx != nullptr;
     if (!audio_ready && !video_ready) {
         update_status({.active = false, .detail = "no_supported_streams"});
@@ -460,8 +471,9 @@ void url_media_player::impl::run(remote_media_load request) {
         .video = video_ready,
         .detail = request.autoplay ? "playing" : "paused",
     });
-    log::diagnostic("Cast media renderer started: url={}, audio={}, video={}", request.url,
-                    audio_ready ? "true" : "false", video_ready ? "true" : "false");
+    log::diagnostic("Cast media renderer started: url={}, audio={}, video={}, audio_output={}",
+                    request.url, audio_ready ? "true" : "false",
+                    video_ready ? "true" : "false", audio_output ? "true" : "false");
 
     if (request.start_time > 0.0) {
         const auto timestamp = static_cast<int64_t>(request.start_time * AV_TIME_BASE);
@@ -478,6 +490,8 @@ void url_media_player::impl::run(remote_media_load request) {
         return;
     }
 
+    uint64_t decoded_audio_frames = 0;
+    uint64_t decoded_video_frames = 0;
     while (!stop_requested.load(std::memory_order_relaxed)) {
         if (auto seek = take_seek_request()) {
             const auto timestamp = static_cast<int64_t>(*seek * AV_TIME_BASE);
@@ -509,10 +523,12 @@ void url_media_player::impl::run(remote_media_load request) {
         }
 
         if (packet->stream_index == audio_stream && audio_ready) {
-            decode_audio_packet(*audio_ctx, *audio_swr, *audio_frame, *packet, *audio_output,
-                                audio_channels);
+            decoded_audio_frames += decode_audio_packet(*audio_ctx, *audio_swr, *audio_frame,
+                                                        *packet, audio_output.get(),
+                                                        audio_channels);
         } else if (packet->stream_index == video_stream && video_ready) {
-            decode_video_packet(*video_ctx, *video_frame, *packet, request, renderer);
+            decoded_video_frames +=
+                decode_video_packet(*video_ctx, *video_frame, *packet, request, renderer);
         }
         av_packet_unref(packet.get());
     }
@@ -525,7 +541,9 @@ void url_media_player::impl::run(remote_media_load request) {
         update_status({.active = false, .audio = audio_ready, .video = video_ready,
                        .detail = "finished"});
     }
-    log::diagnostic("Cast media renderer stopped: url={}", request.url);
+    log::diagnostic(
+        "Cast media renderer stopped: url={}, decoded_audio_frames={}, decoded_video_frames={}",
+        request.url, decoded_audio_frames, decoded_video_frames);
 }
 
 url_media_player::url_media_player() : impl_(std::make_unique<impl>()) {}

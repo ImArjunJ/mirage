@@ -21,6 +21,24 @@ fi
 tmpdir=$(mktemp -d)
 pid=
 
+python3 - "${tmpdir}/cast-tone.wav" <<'PY'
+import math
+import struct
+import sys
+import wave
+
+sample_rate = 44100
+duration = 2.0
+frames = int(sample_rate * duration)
+with wave.open(sys.argv[1], "wb") as out:
+    out.setnchannels(2)
+    out.setsampwidth(2)
+    out.setframerate(sample_rate)
+    for i in range(frames):
+        sample = int(0.25 * 32767 * math.sin(2.0 * math.pi * 440.0 * i / sample_rate))
+        out.writeframesraw(struct.pack("<hh", sample, sample))
+PY
+
 dump_failure() {
     local code=$?
     echo "cast probe smoke failed; logs from ${tmpdir}" >&2
@@ -80,7 +98,8 @@ printf "%s" "${response}" | grep -q "HTTP/1.1 200 OK"
 printf "%s" "${response}" | grep -q '"receiver":"cast-v2"'
 printf "%s" "${response}" | grep -q '"status":"app_media_ready"'
 
-python3 - "${port}" "${status_json}" <<'PY'
+python3 - "${port}" "${status_json}" "${tmpdir}/cast-tone.wav" <<'PY'
+import json
 import pathlib
 import socket
 import ssl
@@ -90,6 +109,7 @@ import time
 
 
 status_path = pathlib.Path(sys.argv[2])
+media_uri = pathlib.Path(sys.argv[3]).as_uri()
 
 
 def wait_status_contains(*needles):
@@ -268,19 +288,32 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     sock.sendall(
         cast_message(
             "urn:x-cast:com.google.cast.media",
-            '{"type":"LOAD","requestId":8,'
-            '"media":{"contentId":"file:///definitely/missing/mirage-cast-smoke.mp3",'
-            '"contentType":"audio/mpeg","duration":123.4,'
-            '"metadata":{"title":"cast song","artist":"cast artist",'
-            '"albumName":"cast album"}},'
-            '"currentTime":4.5}',
+            json.dumps(
+                {
+                    "type": "LOAD",
+                    "requestId": 8,
+                    "media": {
+                        "contentId": media_uri,
+                        "contentType": "audio/wav",
+                        "duration": 2.0,
+                        "metadata": {
+                            "title": "cast song",
+                            "artist": "cast artist",
+                            "albumName": "cast album",
+                        },
+                    },
+                    "currentTime": 0.0,
+                    "autoplay": False,
+                },
+                separators=(",", ":"),
+            ),
         )
     )
     length = struct.unpack(">I", recv_exact(sock, 4))[0]
     response = recv_exact(sock, length)
     assert b"MEDIA_STATUS" in response
     assert b'"mediaSessionId":1' in response
-    assert b'"playerState":"PLAYING"' in response
+    assert b'"playerState":"PAUSED"' in response
     assert b'"title":"cast song"' in response
     assert b'"requestId":8' in response
     wait_status_contains(
@@ -364,13 +397,13 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     sock.sendall(
         cast_message(
             "urn:x-cast:com.google.cast.media",
-            '{"type":"SEEK","requestId":10,"mediaSessionId":1,"currentTime":40.0}',
+            '{"type":"SEEK","requestId":10,"mediaSessionId":1,"currentTime":0.5}',
         )
     )
     length = struct.unpack(">I", recv_exact(sock, 4))[0]
     response = recv_exact(sock, length)
     assert b"MEDIA_STATUS" in response
-    assert b'"currentTime":40.' in response
+    assert b'"currentTime":0.5' in response
     assert b'"requestId":10' in response
     wait_status_contains(
         '"protocol":"cast"',
@@ -396,6 +429,7 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
         '"health":"attention"',
         '"reason":"renderer_playback:PLAY"',
     )
+    time.sleep(0.2)
 
     sock.sendall(
         cast_message(
@@ -561,9 +595,11 @@ grep -q "Cast app: default media receiver running" "${tmpdir}/err"
 grep -q "Cast control: volume_updated=muted" "${tmpdir}/err"
 grep -q "Cast control: invalid_request=INVALID_COMMAND" "${tmpdir}/err"
 grep -q "Cast media: renderer loading cast song" "${tmpdir}/err"
+grep -Eq "Cast media renderer started: url=file://.*/cast-tone.wav, audio=true, video=false, audio_output=(true|false)" "${tmpdir}/err"
 grep -q "Cast media: renderer playback command=PAUSE" "${tmpdir}/err"
 grep -q "Cast media: renderer playback command=SEEK" "${tmpdir}/err"
 grep -q "Cast media: renderer playback command=PLAY" "${tmpdir}/err"
 grep -q "Cast media: invalid_request=INVALID_COMMAND" "${tmpdir}/err"
+grep -Eq "Cast media renderer stopped: url=file://.*/cast-tone.wav, decoded_audio_frames=[1-9][0-9]*, decoded_video_frames=0" "${tmpdir}/err"
 test -s "${tmpdir}/state/mirage/identity.key"
 grep -Eq '^[A-Za-z0-9+/]{43}=$' "${tmpdir}/state/mirage/identity.key"

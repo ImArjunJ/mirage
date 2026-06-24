@@ -41,7 +41,7 @@ int main() {
                  "get response name mismatch");
     ok &= expect(contains(get.response, "\"status\":\"app_media_ready\""),
                  "get response status body mismatch");
-    ok &= expect(contains(get.response, "media rendering is not implemented yet"),
+    ok &= expect(contains(get.response, "media renderer is enabled"),
                  "get response detail mismatch");
 
     auto head = mirage::protocols::cast::handle_probe(
