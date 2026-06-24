@@ -125,6 +125,34 @@ def wait_status_contains(*needles):
     raise AssertionError(f"status did not contain {needles}: {last}")
 
 
+def wait_media_stream(reason, health=None, decoded_min=None, frames_min=None):
+    accepted_reasons = {reason} if isinstance(reason, str) else set(reason)
+    last = ""
+    for _ in range(50):
+        try:
+            last = status_path.read_text()
+            status = json.loads(last)
+        except (FileNotFoundError, json.JSONDecodeError):
+            status = {}
+        for client in status.get("clients", []):
+            if client.get("protocol") != "cast":
+                continue
+            for stream in client.get("streams", []):
+                if stream.get("kind") != "media":
+                    continue
+                if stream.get("reason") not in accepted_reasons:
+                    continue
+                if health is not None and stream.get("health") != health:
+                    continue
+                if decoded_min is not None and stream.get("decoded_packets", 0) < decoded_min:
+                    continue
+                if frames_min is not None and stream.get("frames", 0) < frames_min:
+                    continue
+                return stream
+        time.sleep(0.1)
+    raise AssertionError(f"media stream did not match {accepted_reasons}: {last}")
+
+
 def varint(value):
     out = bytearray()
     while value >= 0x80:
@@ -322,9 +350,8 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
         '"title":"cast song"',
         '"artist":"cast artist"',
         '"kind":"media"',
-        '"health":"attention"',
-        '"reason":"renderer_loading:cast song"',
     )
+    wait_media_stream("renderer:paused", health="clean")
 
     with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as second:
         second.sendall(
@@ -390,9 +417,8 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     wait_status_contains(
         '"protocol":"cast"',
         '"kind":"media"',
-        '"health":"attention"',
-        '"reason":"renderer_playback:PAUSE"',
     )
+    wait_media_stream("renderer:paused", health="clean")
 
     sock.sendall(
         cast_message(
@@ -405,12 +431,7 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     assert b"MEDIA_STATUS" in response
     assert b'"currentTime":0.5' in response
     assert b'"requestId":10' in response
-    wait_status_contains(
-        '"protocol":"cast"',
-        '"kind":"media"',
-        '"health":"attention"',
-        '"reason":"renderer_playback:SEEK"',
-    )
+    wait_media_stream("renderer:paused", health="clean")
 
     sock.sendall(
         cast_message(
@@ -426,9 +447,8 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
     wait_status_contains(
         '"protocol":"cast"',
         '"kind":"media"',
-        '"health":"attention"',
-        '"reason":"renderer_playback:PLAY"',
     )
+    wait_media_stream(("renderer:playing", "renderer:finished"), health="clean")
     time.sleep(0.2)
 
     sock.sendall(
@@ -484,6 +504,7 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
         '"health":"clean"',
         '"reason":"media_stopped"',
     )
+    wait_media_stream("renderer:stopped", health="clean", decoded_min=1)
 
     sock.sendall(
         cast_message(

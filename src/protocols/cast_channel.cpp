@@ -1,13 +1,16 @@
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <format>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #include "core/core.hpp"
 #include "core/log.hpp"
@@ -19,20 +22,20 @@
 #include "protocols/cast/tls.hpp"
 #include "protocols/protocols.hpp"
 namespace mirage::protocols {
+
+struct cast_status_publisher;
+
 struct cast_receiver::impl {
     io::tcp_acceptor acceptor;
     std::string device_name;
     receiver_session_observer* observer = nullptr;
     std::shared_ptr<cast::channel_session_state> channel_state;
     std::shared_ptr<media::url_media_player> media_player;
+    std::shared_ptr<cast_status_publisher> status_publisher;
     bool running = false;
     impl(io::io_context& ctx, uint16_t port, std::string name,
-         receiver_session_observer* session_observer)
-        : acceptor(io::tcp_acceptor::bind(ctx, port)),
-          device_name(std::move(name)),
-          observer(session_observer),
-          channel_state(std::make_shared<cast::channel_session_state>()),
-          media_player(std::make_shared<media::url_media_player>()) {}
+         receiver_session_observer* session_observer);
+    ~impl();
 };
 cast_receiver::cast_receiver(std::unique_ptr<impl> impl_ptr) : impl_(std::move(impl_ptr)) {}
 cast_receiver::~cast_receiver() = default;
@@ -78,6 +81,24 @@ receiver_client_stream_status app_stream_status(std::string reason) {
         .kind = "app",
         .health = "clean",
         .reason = std::move(reason),
+    };
+}
+
+bool renderer_detail_needs_attention(std::string_view detail) {
+    return detail == "allocation_failed" || detail == "empty_url" ||
+           detail == "no_supported_streams" || detail == "open_failed" ||
+           detail == "stream_info_failed";
+}
+
+receiver_client_stream_status renderer_stream_status(
+    const media::remote_media_playback_status& status) {
+    const auto detail = status.detail.empty() ? std::string("idle") : status.detail;
+    return {
+        .kind = "media",
+        .health = renderer_detail_needs_attention(detail) ? "attention" : "clean",
+        .reason = std::format("renderer:{}", detail),
+        .decoded_packets = status.decoded_audio_frames,
+        .frames = status.decoded_video_frames,
     };
 }
 
@@ -150,8 +171,7 @@ void publish_cast_activity(receiver_session_observer* observer, uint64_t client_
                     client_status_id,
                     media_attention_status(std::format("renderer_playback:{}", activity.detail)));
             }
-            mirage::log::diagnostic("Cast media: renderer playback command={}",
-                                    activity.detail);
+            mirage::log::diagnostic("Cast media: renderer playback command={}", activity.detail);
             break;
         case cast::channel_event::media_stopped:
             if (observer != nullptr && client_status_id != 0) {
@@ -178,6 +198,67 @@ void publish_cast_activity(receiver_session_observer* observer, uint64_t client_
             break;
     }
 }
+
+}  // namespace
+
+struct cast_status_publisher {
+    explicit cast_status_publisher(receiver_session_observer* session_observer)
+        : observer(session_observer) {}
+
+    void add(uint64_t client_status_id) {
+        if (client_status_id == 0) {
+            return;
+        }
+        std::scoped_lock lock(mutex);
+        if (std::ranges::find(client_status_ids, client_status_id) == client_status_ids.end()) {
+            client_status_ids.push_back(client_status_id);
+        }
+    }
+
+    void remove(uint64_t client_status_id) {
+        std::scoped_lock lock(mutex);
+        std::erase(client_status_ids, client_status_id);
+    }
+
+    void publish(const media::remote_media_playback_status& status) {
+        if (observer == nullptr) {
+            return;
+        }
+        std::vector<uint64_t> client_ids;
+        {
+            std::scoped_lock lock(mutex);
+            client_ids = client_status_ids;
+        }
+        const auto stream = renderer_stream_status(status);
+        for (const auto client_id : client_ids) {
+            observer->client_stream_updated(client_id, stream);
+        }
+    }
+
+    receiver_session_observer* observer = nullptr;
+    std::mutex mutex;
+    std::vector<uint64_t> client_status_ids;
+};
+
+cast_receiver::impl::impl(io::io_context& ctx, uint16_t port, std::string name,
+                          receiver_session_observer* session_observer)
+    : acceptor(io::tcp_acceptor::bind(ctx, port)),
+      device_name(std::move(name)),
+      observer(session_observer),
+      channel_state(std::make_shared<cast::channel_session_state>()),
+      media_player(std::make_shared<media::url_media_player>()),
+      status_publisher(std::make_shared<cast_status_publisher>(session_observer)) {
+    media_player->set_status_callback(
+        [publisher = status_publisher](media::remote_media_playback_status status) {
+            publisher->publish(status);
+        });
+}
+
+cast_receiver::impl::~impl() {
+    media_player->set_status_callback({});
+}
+
+namespace {
 
 io::task<bool> write_cast_frame(io::tcp_stream& socket, std::span<const std::byte> frame) {
     co_await socket.async_write(frame);
@@ -364,8 +445,7 @@ io::task<void> handle_cast_connection(io::tcp_stream socket, std::string device_
                 mirage::log::debug(
                     "cast channel: plaintext frame stream connected, app/media control enabled");
                 co_await handle_cast_channel(socket, data, device_name, *state, media_player,
-                                             observer,
-                                             client_status_id);
+                                             observer, client_status_id);
                 break;
             case cast::probe_kind::unsupported:
                 mirage::log::debug("cast probe: unsupported first packet");
@@ -381,13 +461,17 @@ io::task<void> handle_cast_connection(io::tcp_stream socket, std::string device_
     socket.close();
 }
 
-io::task<void> handle_observed_cast_connection(io::tcp_stream socket, std::string device_name,
-                                               std::shared_ptr<cast::channel_session_state> state,
-                                               std::shared_ptr<media::url_media_player> media_player,
-                                               receiver_session_observer* observer,
-                                               uint64_t client_status_id) {
+io::task<void> handle_observed_cast_connection(
+    io::tcp_stream socket, std::string device_name,
+    std::shared_ptr<cast::channel_session_state> state,
+    std::shared_ptr<media::url_media_player> media_player,
+    std::shared_ptr<cast_status_publisher> status_publisher, receiver_session_observer* observer,
+    uint64_t client_status_id) {
     co_await handle_cast_connection(std::move(socket), std::move(device_name), std::move(state),
                                     std::move(media_player), observer, client_status_id);
+    if (status_publisher != nullptr && client_status_id != 0) {
+        status_publisher->remove(client_status_id);
+    }
     if (observer != nullptr && client_status_id != 0) {
         observer->client_disconnected(client_status_id);
     }
@@ -412,6 +496,9 @@ io::task<void> cast_receiver::run() {
                     .media = {},
                     .streams = {},
                 });
+                if (impl_->status_publisher != nullptr) {
+                    impl_->status_publisher->add(client_status_id);
+                }
                 impl_->observer->client_stream_updated(client_status_id,
                                                        control_stream_status("connected"));
             }
@@ -420,7 +507,7 @@ io::task<void> cast_receiver::run() {
             io::co_spawn(impl_->acceptor.context(),
                          handle_observed_cast_connection(std::move(socket), impl_->device_name,
                                                          impl_->channel_state, impl_->media_player,
-                                                         impl_->observer,
+                                                         impl_->status_publisher, impl_->observer,
                                                          client_status_id));
         } catch (const std::system_error& e) {
             if (impl_->running && e.code() != std::errc::operation_canceled) {

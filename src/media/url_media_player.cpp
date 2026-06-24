@@ -179,8 +179,7 @@ codec_context_ptr open_decoder(const AVStream& stream) {
     return ctx;
 }
 
-swr_ptr create_audio_resampler(const AVCodecContext& ctx, int& out_sample_rate,
-                               int& out_channels) {
+swr_ptr create_audio_resampler(const AVCodecContext& ctx, int& out_sample_rate, int& out_channels) {
     out_sample_rate = ctx.sample_rate > 0 ? ctx.sample_rate : 44100;
     out_channels = 2;
 
@@ -218,6 +217,8 @@ struct url_media_player::impl {
 
     mutable std::mutex status_mutex;
     remote_media_playback_status playback_status;
+    std::mutex callback_mutex;
+    remote_media_status_callback status_callback;
 
     std::mutex command_mutex;
     bool seek_requested = false;
@@ -229,14 +230,62 @@ struct url_media_player::impl {
     float volume_db = 0.0F;
     float linear_volume = 1.0F;
 
+    void emit_status(remote_media_playback_status status) {
+        remote_media_status_callback callback;
+        {
+            std::scoped_lock lock(callback_mutex);
+            callback = status_callback;
+        }
+        if (callback) {
+            callback(std::move(status));
+        }
+    }
+
     void update_status(remote_media_playback_status status) {
-        std::scoped_lock lock(status_mutex);
-        playback_status = std::move(status);
+        remote_media_playback_status snapshot;
+        {
+            std::scoped_lock lock(status_mutex);
+            playback_status = std::move(status);
+            snapshot = playback_status;
+        }
+        emit_status(std::move(snapshot));
     }
 
     void update_detail(std::string detail) {
-        std::scoped_lock lock(status_mutex);
-        playback_status.detail = std::move(detail);
+        remote_media_playback_status snapshot;
+        {
+            std::scoped_lock lock(status_mutex);
+            playback_status.detail = std::move(detail);
+            snapshot = playback_status;
+        }
+        emit_status(std::move(snapshot));
+    }
+
+    void update_counts(uint64_t decoded_audio_frames, uint64_t decoded_video_frames) {
+        remote_media_playback_status snapshot;
+        {
+            std::scoped_lock lock(status_mutex);
+            playback_status.decoded_audio_frames = decoded_audio_frames;
+            playback_status.decoded_video_frames = decoded_video_frames;
+            snapshot = playback_status;
+        }
+        emit_status(std::move(snapshot));
+    }
+
+    void mark_stopped() {
+        remote_media_playback_status snapshot;
+        {
+            std::scoped_lock lock(status_mutex);
+            playback_status.active = false;
+            playback_status.detail = "stopped";
+            snapshot = playback_status;
+        }
+        emit_status(std::move(snapshot));
+    }
+
+    void set_status_callback(remote_media_status_callback callback) {
+        std::scoped_lock lock(callback_mutex);
+        status_callback = std::move(callback);
     }
 
     void set_paused(bool value) {
@@ -320,9 +369,9 @@ uint64_t decode_audio_packet(AVCodecContext& ctx, SwrContext& swr, AVFrame& fram
         const size_t bytes_per_sample = static_cast<size_t>(out_channels) * sizeof(int16_t);
         std::vector<uint8_t> pcm(static_cast<size_t>(max_out_samples) * bytes_per_sample);
         uint8_t* out_buf = pcm.data();
-        const int converted = swr_convert(&swr, &out_buf, max_out_samples,
-                                          const_cast<const uint8_t**>(frame.extended_data),
-                                          frame.nb_samples);
+        const int converted =
+            swr_convert(&swr, &out_buf, max_out_samples,
+                        const_cast<const uint8_t**>(frame.extended_data), frame.nb_samples);
         if (converted < 0) {
             log::warn("Cast media audio resample failed: {}", av_error_string(converted));
             av_frame_unref(&frame);
@@ -395,14 +444,16 @@ void url_media_player::impl::run(remote_media_load request) {
         .active = true,
         .audio = false,
         .video = false,
+        .audio_output = false,
+        .decoded_audio_frames = 0,
+        .decoded_video_frames = 0,
         .detail = "opening",
     });
 
     AVFormatContext* raw_format = avformat_alloc_context();
     if (raw_format == nullptr) {
         update_status({.active = false, .detail = "open_failed"});
-        log::warn("Cast media open failed for {}: could not allocate format context",
-                  request.url);
+        log::warn("Cast media open failed for {}: could not allocate format context", request.url);
         return;
     }
     raw_format->interrupt_callback.callback = interrupt_callback;
@@ -469,11 +520,14 @@ void url_media_player::impl::run(remote_media_load request) {
         .active = true,
         .audio = audio_ready,
         .video = video_ready,
+        .audio_output = audio_output != nullptr,
+        .decoded_audio_frames = 0,
+        .decoded_video_frames = 0,
         .detail = request.autoplay ? "playing" : "paused",
     });
     log::diagnostic("Cast media renderer started: url={}, audio={}, video={}, audio_output={}",
-                    request.url, audio_ready ? "true" : "false",
-                    video_ready ? "true" : "false", audio_output ? "true" : "false");
+                    request.url, audio_ready ? "true" : "false", video_ready ? "true" : "false",
+                    audio_output ? "true" : "false");
 
     if (request.start_time > 0.0) {
         const auto timestamp = static_cast<int64_t>(request.start_time * AV_TIME_BASE);
@@ -505,9 +559,15 @@ void url_media_player::impl::run(remote_media_load request) {
                 if (video_ctx) {
                     avcodec_flush_buffers(video_ctx.get());
                 }
-                update_status({.active = true, .audio = audio_ready, .video = video_ready,
-                               .detail = paused.load(std::memory_order_relaxed) ? "paused"
-                                                                                 : "playing"});
+                update_status({
+                    .active = true,
+                    .audio = audio_ready,
+                    .video = video_ready,
+                    .audio_output = audio_output != nullptr,
+                    .decoded_audio_frames = decoded_audio_frames,
+                    .decoded_video_frames = decoded_video_frames,
+                    .detail = paused.load(std::memory_order_relaxed) ? "paused" : "playing",
+                });
                 log::diagnostic("Cast media renderer seek: url={}, position={}", request.url,
                                 *seek);
             }
@@ -523,9 +583,8 @@ void url_media_player::impl::run(remote_media_load request) {
         }
 
         if (packet->stream_index == audio_stream && audio_ready) {
-            decoded_audio_frames += decode_audio_packet(*audio_ctx, *audio_swr, *audio_frame,
-                                                        *packet, audio_output.get(),
-                                                        audio_channels);
+            decoded_audio_frames += decode_audio_packet(
+                *audio_ctx, *audio_swr, *audio_frame, *packet, audio_output.get(), audio_channels);
         } else if (packet->stream_index == video_stream && video_ready) {
             decoded_video_frames +=
                 decode_video_packet(*video_ctx, *video_frame, *packet, request, renderer);
@@ -535,12 +594,27 @@ void url_media_player::impl::run(remote_media_load request) {
 
     set_audio_player(nullptr);
     if (stop_requested.load(std::memory_order_relaxed)) {
-        update_status({.active = false, .audio = audio_ready, .video = video_ready,
-                       .detail = "stopped"});
+        update_status({
+            .active = false,
+            .audio = audio_ready,
+            .video = video_ready,
+            .audio_output = audio_output != nullptr,
+            .decoded_audio_frames = decoded_audio_frames,
+            .decoded_video_frames = decoded_video_frames,
+            .detail = "stopped",
+        });
     } else {
-        update_status({.active = false, .audio = audio_ready, .video = video_ready,
-                       .detail = "finished"});
+        update_status({
+            .active = false,
+            .audio = audio_ready,
+            .video = video_ready,
+            .audio_output = audio_output != nullptr,
+            .decoded_audio_frames = decoded_audio_frames,
+            .decoded_video_frames = decoded_video_frames,
+            .detail = "finished",
+        });
     }
+    update_counts(decoded_audio_frames, decoded_video_frames);
     log::diagnostic(
         "Cast media renderer stopped: url={}, decoded_audio_frames={}, decoded_video_frames={}",
         request.url, decoded_audio_frames, decoded_video_frames);
@@ -560,8 +634,8 @@ void url_media_player::load(remote_media_load request) {
     }
 
     impl_->stop_requested.store(false, std::memory_order_relaxed);
-    impl_->worker = std::thread(
-        [impl = impl_.get(), request = std::move(request)] { impl->run(request); });
+    impl_->worker =
+        std::thread([impl = impl_.get(), request = std::move(request)] { impl->run(request); });
 }
 
 void url_media_player::stop() {
@@ -571,7 +645,7 @@ void url_media_player::stop() {
     if (impl_->worker.joinable()) {
         impl_->worker.join();
     }
-    impl_->update_status({.active = false, .detail = "stopped"});
+    impl_->mark_stopped();
 }
 
 void url_media_player::play() {
@@ -592,6 +666,10 @@ void url_media_player::set_playback_rate(double rate) {
 
 void url_media_player::set_volume(float db, float linear) {
     impl_->apply_volume(db, linear);
+}
+
+void url_media_player::set_status_callback(remote_media_status_callback callback) {
+    impl_->set_status_callback(std::move(callback));
 }
 
 remote_media_playback_status url_media_player::status() const {

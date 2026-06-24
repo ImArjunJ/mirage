@@ -86,8 +86,8 @@ int main() {
         },
     };
 
-    mirage::receiver_adapter_registry adapters(std::span<const mirage::receiver_source_descriptor>(
-        sources.data(), sources.size()));
+    mirage::receiver_adapter_registry adapters(
+        std::span<const mirage::receiver_source_descriptor>(sources.data(), sources.size()));
     adapters.mark_listening(mirage::protocol::airplay);
     adapters.mark_advertised(mirage::protocol::airplay);
     adapters.mark_error(mirage::protocol::cast, "bind \"failed\"");
@@ -128,6 +128,13 @@ int main() {
             .decrypted_frames = 89,
             .decode_failures = 1,
         },
+        mirage::receiver_client_stream_status{
+            .kind = "media",
+            .health = "clean",
+            .reason = "renderer:playing",
+            .decoded_packets = 47,
+            .frames = 5,
+        },
     };
 
     const auto json = mirage::render_status_json({
@@ -146,10 +153,8 @@ int main() {
     });
 
     ok &= expect(contains(json, "\"pid\":42"), "pid missing");
-    ok &= expect(contains(json, "\"name\":\"Living \\\"Room\\\"\\n\""),
-                 "escaped name mismatch");
-    ok &= expect(contains(json, "\"identity_key\":\"/tmp/mirage/key\""),
-                 "identity key missing");
+    ok &= expect(contains(json, "\"name\":\"Living \\\"Room\\\"\\n\""), "escaped name mismatch");
+    ok &= expect(contains(json, "\"identity_key\":\"/tmp/mirage/key\""), "identity key missing");
     ok &= expect(contains(json, "\"airplay_port\":7000"), "airplay port missing");
     ok &= expect(contains(json, "\"cast_port\":8009"), "cast port missing");
     ok &= expect(contains(json, "\"miracast_port\":7236"), "miracast port missing");
@@ -195,6 +200,11 @@ int main() {
     ok &= expect(contains(json, "\"reason\":\"decode_failures\""), "video reason missing");
     ok &= expect(contains(json, "\"frames\":90"), "video frame count missing");
     ok &= expect(contains(json, "\"decode_failures\":1"), "video failure count missing");
+    ok &= expect(contains(json, "\"kind\":\"media\""), "media stream missing");
+    ok &=
+        expect(contains(json, "\"reason\":\"renderer:playing\""), "media renderer reason missing");
+    ok &= expect(contains(json, "\"decoded_packets\":47"), "media decoded count missing");
+    ok &= expect(contains(json, "\"frames\":5"), "media frame count missing");
 
     const auto summary = mirage::parse_status_summary(json);
     ok &= expect(summary.name == "Living \"Room\"\n", "summary name unescape mismatch");
@@ -205,8 +215,7 @@ int main() {
     if (!summary.clients.empty()) {
         ok &= expect(summary.clients[0].media.title == "song \"one\"",
                      "summary media title mismatch");
-        ok &= expect(summary.clients[0].streams.size() == 2,
-                     "summary stream count mismatch");
+        ok &= expect(summary.clients[0].streams.size() == 3, "summary stream count mismatch");
     }
 
     const auto brief_text = mirage::render_status_summary_text(
@@ -217,8 +226,8 @@ int main() {
 
     const auto verbose_text = mirage::render_status_summary_text(
         summary, 42, true, std::chrono::system_clock::from_time_t(123456 + 3661));
-    ok &= expect(contains(verbose_text, "  name: Living \"Room\"\n"),
-                 "verbose status name missing");
+    ok &=
+        expect(contains(verbose_text, "  name: Living \"Room\"\n"), "verbose status name missing");
     ok &= expect(contains(verbose_text,
                           "    airplay: listening, port 7000, transport rtsp/raop, "
                           "audio/video/media/remote/metadata, advertised\n"),
@@ -237,8 +246,11 @@ int main() {
                           "      video: attention, frames 90, keyframes 1, "
                           "reason decode_failures\n"),
                  "verbose video stream line mismatch");
-    ok &= expect(contains(verbose_text, "  uptime: 1h 1m 1s\n"),
-                 "verbose uptime mismatch");
+    ok &= expect(contains(verbose_text,
+                          "      media: clean, decoded 47, frames 5, "
+                          "reason renderer:playing\n"),
+                 "verbose media stream line mismatch");
+    ok &= expect(contains(verbose_text, "  uptime: 1h 1m 1s\n"), "verbose uptime mismatch");
 
     return ok ? 0 : 1;
 }

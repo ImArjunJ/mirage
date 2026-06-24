@@ -508,8 +508,7 @@ receiver_status_summary parse_status_summary(std::string_view json) {
 }
 
 std::string render_status_summary_text(const receiver_status_summary& summary, int pid,
-                                       bool verbose,
-                                       std::chrono::system_clock::time_point now) {
+                                       bool verbose, std::chrono::system_clock::time_point now) {
     std::ostringstream out;
     out << std::format("mirage is running (pid {})\n", pid);
     if (!summary.name.empty()) {
@@ -546,8 +545,7 @@ std::string render_status_summary_text(const receiver_status_summary& summary, i
     out << "  protocols:\n";
     for (const auto& protocol : summary.protocols) {
         const bool disabled = protocol.state == "disabled";
-        std::string line = std::format("    {}: {}",
-                                       protocol.id.empty() ? "protocol" : protocol.id,
+        std::string line = std::format("    {}: {}", protocol.id.empty() ? "protocol" : protocol.id,
                                        protocol.state.empty() ? "unknown" : protocol.state);
         if (protocol.port > 0) {
             line += std::format(", port {}", protocol.port);
@@ -622,18 +620,19 @@ std::string render_status_summary_text(const receiver_status_summary& summary, i
             std::string stream_line =
                 std::format("      {}: {}", stream.kind.empty() ? "stream" : stream.kind,
                             stream.health.empty() ? "unknown" : stream.health);
-            if (stream.kind == "audio") {
-                if (stream.decoded_packets) {
+            if (stream.kind == "audio" || stream.kind == "media") {
+                if (stream.decoded_packets.value_or(0) > 0) {
                     stream_line += std::format(", decoded {}", *stream.decoded_packets);
                 }
-                if (stream.received_packets) {
+                if (stream.received_packets.value_or(0) > 0) {
                     stream_line += std::format(", received {}", *stream.received_packets);
                 }
-            } else if (stream.kind == "video") {
-                if (stream.frames) {
+            }
+            if (stream.kind == "video" || stream.kind == "media") {
+                if (stream.frames.value_or(0) > 0) {
                     stream_line += std::format(", frames {}", *stream.frames);
                 }
-                if (stream.keyframes) {
+                if (stream.keyframes.value_or(0) > 0) {
                     stream_line += std::format(", keyframes {}", *stream.keyframes);
                 }
             }
