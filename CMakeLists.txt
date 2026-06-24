@@ -101,6 +101,7 @@ set(MIRAGE_CORE_SOURCES
     src/core/error.cpp
     src/core/cli_options.cpp
     src/core/config.cpp
+    src/core/port_probe.cpp
     src/core/receiver_identity.cpp
     src/core/receiver_adapter.cpp
     src/core/receiver_source.cpp
@@ -317,6 +318,14 @@ if(BUILD_TESTING)
         tests/test_runtime_process.cpp
         src/core/runtime_process.cpp
     )
+
+    mirage_add_unit_test(port_probe mirage_port_probe_test
+        tests/test_port_probe.cpp
+        src/core/port_probe.cpp
+    )
+    if(WIN32)
+        target_link_libraries(mirage_port_probe_test PRIVATE ws2_32)
+    endif()
 
     mirage_add_unit_test(runtime_status mirage_runtime_status_test
         tests/test_runtime_status.cpp

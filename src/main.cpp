@@ -27,6 +27,7 @@
 #include "core/core.hpp"
 #include "core/cli_options.hpp"
 #include "core/log.hpp"
+#include "core/port_probe.hpp"
 #include "core/receiver_adapter.hpp"
 #include "core/receiver_session.hpp"
 #include "core/runtime_paths.hpp"
@@ -273,6 +274,7 @@ int handle_doctor(int argc, char* argv[]) {
         std::println("check: no receiver protocols enabled");
     }
 
+    bool duplicate_ports = false;
     for (size_t i = 0; i < sources.size(); ++i) {
         if (!sources[i].enabled || sources[i].port == 0) {
             continue;
@@ -280,10 +282,31 @@ int handle_doctor(int argc, char* argv[]) {
         for (size_t j = i + 1; j < sources.size(); ++j) {
             if (sources[j].enabled && sources[j].port == sources[i].port) {
                 ok = false;
+                duplicate_ports = true;
                 std::println("check: {} and {} share port {}", mirage::protocol_id(sources[i].id),
                              mirage::protocol_id(sources[j].id), sources[i].port);
             }
         }
+    }
+
+    bool checked_ports = false;
+    bool ports_available = true;
+    for (const auto& source : sources) {
+        if (!source.enabled || source.port == 0) {
+            continue;
+        }
+        checked_ports = true;
+        auto probe = mirage::probe_tcp_port_available(source.port);
+        if (!probe.available) {
+            ok = false;
+            ports_available = false;
+            std::println("check: {} port {} unavailable ({})", mirage::protocol_id(source.id),
+                         source.port, probe.message);
+            std::println("       inspect with: {}", inspect_port_command(source.port));
+        }
+    }
+    if (checked_ports && ports_available && !duplicate_ports) {
+        std::println("ports: available");
     }
 
     auto interfaces = mirage::discovery::enumerate_interfaces();
