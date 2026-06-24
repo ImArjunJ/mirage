@@ -10,6 +10,8 @@
 
 #include <openssl/crypto.h>
 
+#include "core/runtime_assets.hpp"
+
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -98,6 +100,55 @@ check_result vulkan_check() {
     };
 }
 
+std::vector<std::string> asset_names() {
+    std::vector<std::string> names;
+    for (auto shader : assets::required_shader_names()) {
+        names.emplace_back(shader);
+    }
+    return names;
+}
+
+check_result shader_assets_check() {
+    std::vector<std::string> missing;
+    std::optional<std::filesystem::path> common_dir;
+    bool same_dir = true;
+
+    for (auto shader : assets::required_shader_names()) {
+        auto path = assets::locate_shader(shader);
+        if (!path) {
+            missing.emplace_back(shader);
+            continue;
+        }
+        auto parent = path->parent_path();
+        if (!common_dir) {
+            common_dir = parent;
+        } else if (*common_dir != parent) {
+            same_dir = false;
+        }
+    }
+
+    if (!missing.empty()) {
+        return {
+            .name = "shaders",
+            .level = check_level::error,
+            .detail = std::format("missing {}", join_names(missing)),
+            .fix = "set MIRAGE_SHADER_DIR or install the mirage shader files",
+        };
+    }
+
+    auto names = asset_names();
+    return {
+        .name = "shaders",
+        .level = check_level::ok,
+        .detail =
+            same_dir && common_dir
+                ? std::format("{} found in {}", join_names(names),
+                              common_dir->lexically_normal().string())
+                : std::format("{} found", join_names(names)),
+        .fix = {},
+    };
+}
+
 }  // namespace
 
 std::vector<std::string> compiled_window_backends() {
@@ -170,6 +221,10 @@ std::string join_names(std::span<const std::string> names) {
 
 std::vector<check_result> collect_runtime_checks() {
     return {openssl_check(), ffmpeg_check(), vulkan_check()};
+}
+
+std::vector<check_result> collect_asset_checks() {
+    return {shader_assets_check()};
 }
 
 std::vector<check_result> collect_backend_hints(const environment_reader& env) {

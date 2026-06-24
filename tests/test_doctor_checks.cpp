@@ -85,5 +85,13 @@ int main() {
         ok &= expect(!hint.detail.empty(), "backend hint detail missing");
     }
 
+    auto asset_checks = mirage::doctor::collect_asset_checks();
+    ok &= expect(asset_checks.size() == 1, "asset check count mismatch");
+    if (!asset_checks.empty()) {
+        ok &= expect(asset_checks.front().name == "shaders", "shader check name mismatch");
+        ok &= expect(asset_checks.front().level == mirage::doctor::check_level::ok,
+                     "shader check should pass in the build tree");
+    }
+
     return ok ? 0 : 1;
 }

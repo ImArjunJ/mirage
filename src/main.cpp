@@ -376,6 +376,11 @@ int handle_doctor(int argc, char* argv[]) {
         print_doctor_check(check, ok);
     }
 
+    std::println("assets:");
+    for (const auto& check : mirage::doctor::collect_asset_checks()) {
+        print_doctor_check(check, ok);
+    }
+
     std::println("backends:");
     for (const auto& check : mirage::doctor::collect_backend_hints(environment_value)) {
         print_doctor_check(check, ok);

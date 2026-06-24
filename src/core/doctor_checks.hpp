@@ -27,6 +27,7 @@ using environment_reader = std::function<std::optional<std::string>(std::string_
 [[nodiscard]] std::string join_names(std::span<const std::string> names);
 
 [[nodiscard]] std::vector<check_result> collect_runtime_checks();
+[[nodiscard]] std::vector<check_result> collect_asset_checks();
 [[nodiscard]] std::vector<check_result> collect_backend_hints(const environment_reader& env);
 
 }  // namespace mirage::doctor

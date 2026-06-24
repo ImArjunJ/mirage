@@ -97,6 +97,8 @@ foreach(SHADER nv12_to_rgb.vert nv12_to_rgb.frag)
     list(APPEND SHADER_OUTPUTS ${SHADER_OUT}/${SHADER}.spv)
 endforeach()
 
+add_custom_target(mirage_shaders DEPENDS ${SHADER_OUTPUTS})
+
 set(MIRAGE_CORE_SOURCES
     src/core/error.cpp
     src/core/cli_options.cpp
@@ -106,6 +108,7 @@ set(MIRAGE_CORE_SOURCES
     src/core/receiver_identity.cpp
     src/core/receiver_adapter.cpp
     src/core/receiver_source.cpp
+    src/core/runtime_assets.cpp
     src/core/runtime_paths.cpp
     src/core/runtime_process.cpp
     src/core/runtime_status.cpp
@@ -188,6 +191,7 @@ add_executable(mirage
     ${MIRAGE_PLATFORM_SOURCES}
     ${SHADER_OUTPUTS}
 )
+add_dependencies(mirage mirage_shaders)
 
 if(WIN32)
     target_sources(mirage PRIVATE
@@ -323,11 +327,27 @@ if(BUILD_TESTING)
     mirage_add_unit_test(doctor_checks mirage_doctor_checks_test
         tests/test_doctor_checks.cpp
         src/core/doctor_checks.cpp
+        src/core/runtime_assets.cpp
+    )
+    add_dependencies(mirage_doctor_checks_test mirage_shaders)
+    target_compile_definitions(mirage_doctor_checks_test PRIVATE
+        MIRAGE_BUILD_SHADER_DIR="${SHADER_OUT}"
+        MIRAGE_INSTALL_SHADER_DIR="${MIRAGE_INSTALL_SHADER_DIR}"
     )
     target_link_libraries(mirage_doctor_checks_test PRIVATE
         OpenSSL::Crypto
         Vulkan::Vulkan
         PkgConfig::FFMPEG
+    )
+
+    mirage_add_unit_test(runtime_assets mirage_runtime_assets_test
+        tests/test_runtime_assets.cpp
+        src/core/runtime_assets.cpp
+    )
+    add_dependencies(mirage_runtime_assets_test mirage_shaders)
+    target_compile_definitions(mirage_runtime_assets_test PRIVATE
+        MIRAGE_BUILD_SHADER_DIR="${SHADER_OUT}"
+        MIRAGE_INSTALL_SHADER_DIR="${MIRAGE_INSTALL_SHADER_DIR}"
     )
 
     mirage_add_unit_test(port_probe mirage_port_probe_test
@@ -397,4 +417,13 @@ if(BUILD_TESTING)
         add_test(NAME wfd_probe_smoke
             COMMAND bash ${CMAKE_SOURCE_DIR}/tests/smoke_wfd_probe.sh $<TARGET_FILE:mirage>)
     endif()
+
+    add_test(NAME install_smoke
+        COMMAND ${CMAKE_COMMAND}
+            -Dbuild_dir=${CMAKE_BINARY_DIR}
+            -Dinstall_prefix=${CMAKE_BINARY_DIR}/install-smoke
+            -Dinstall_config=$<CONFIG>
+            -Dexecutable_name=$<TARGET_FILE_NAME:mirage>
+            -P ${CMAKE_SOURCE_DIR}/tests/install_smoke.cmake
+    )
 endif()
