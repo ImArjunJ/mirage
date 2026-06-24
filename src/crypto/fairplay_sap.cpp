@@ -1,4 +1,5 @@
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 
@@ -6412,13 +6413,57 @@ uint32_t shift_left_32(uint8_t input, int count) {
     return static_cast<uint32_t>((input << count) ^ (input >> (8 - count)));
 }
 
+struct wrapping_byte_ref {
+    uint8_t* value = nullptr;
+
+    operator uint32_t() const { return static_cast<uint32_t>(*value); }
+
+    wrapping_byte_ref& operator=(uint32_t input) {
+        *value = static_cast<uint8_t>(input);
+        return *this;
+    }
+
+    wrapping_byte_ref& operator=(const wrapping_byte_ref& other) {
+        return *this = static_cast<uint32_t>(other);
+    }
+
+    wrapping_byte_ref& operator+=(uint32_t input) {
+        *value = static_cast<uint8_t>(static_cast<uint32_t>(*value) + input);
+        return *this;
+    }
+
+    wrapping_byte_ref& operator-=(uint32_t input) {
+        *value = static_cast<uint8_t>(static_cast<uint32_t>(*value) - input);
+        return *this;
+    }
+
+    wrapping_byte_ref& operator^=(uint32_t input) {
+        *value = static_cast<uint8_t>(static_cast<uint32_t>(*value) ^ input);
+        return *this;
+    }
+};
+
+struct wrapping_byte_buffer {
+    uint8_t* values = nullptr;
+
+    template <typename Index>
+    wrapping_byte_ref operator[](Index index) const {
+        return {.value = values + static_cast<std::size_t>(index)};
+    }
+};
+
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion"
 #pragma GCC diagnostic ignored "-Wparentheses"
 #endif
-void obfuscate_buffers(uint8_t* buffer0, uint8_t* buffer1, uint8_t* buffer2, uint8_t* buffer3,
-                       uint8_t* buffer4) {
+void obfuscate_buffers(uint8_t* raw_buffer0, uint8_t* raw_buffer1, uint8_t* raw_buffer2,
+                       uint8_t* raw_buffer3, uint8_t* raw_buffer4) {
+    wrapping_byte_buffer buffer0{.values = raw_buffer0};
+    wrapping_byte_buffer buffer1{.values = raw_buffer1};
+    wrapping_byte_buffer buffer2{.values = raw_buffer2};
+    wrapping_byte_buffer buffer3{.values = raw_buffer3};
+    wrapping_byte_buffer buffer4{.values = raw_buffer4};
     unsigned int tmp;
     unsigned int tmp2;
     unsigned int tmp3;

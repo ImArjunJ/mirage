@@ -112,6 +112,7 @@ set(MIRAGE_CORE_SOURCES
     src/core/runtime_paths.cpp
     src/core/runtime_process.cpp
     src/core/runtime_status.cpp
+    src/core/sanitizer_suppressions.cpp
     src/core/status_report.cpp
 )
 
@@ -273,6 +274,14 @@ if(BUILD_TESTING)
         src/crypto/srp6a.cpp
     )
     target_link_libraries(mirage_srp6a_test PRIVATE OpenSSL::Crypto)
+
+    mirage_add_unit_test(fairplay_sap mirage_fairplay_sap_test
+        tests/test_fairplay_sap.cpp
+        src/crypto/aes_ctr.cpp
+        src/crypto/fairplay_sap.cpp
+        src/crypto/hash.cpp
+    )
+    target_link_libraries(mirage_fairplay_sap_test PRIVATE OpenSSL::Crypto)
 
     mirage_add_unit_test(airplay_protocol mirage_airplay_protocol_test
         tests/test_airplay_protocol.cpp

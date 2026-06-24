@@ -14,11 +14,35 @@ extern "C" {
 #define MIRAGE_HAS_NVDEC 1
 extern "C" {
 #include <libavutil/hwcontext_cuda.h>
+#include <libavutil/log.h>
 }
 #else
 #define MIRAGE_HAS_NVDEC 0
 #endif
 namespace mirage::media {
+#if MIRAGE_HAS_NVDEC
+namespace {
+
+class av_log_level_guard {
+public:
+    explicit av_log_level_guard(int level) : previous_(av_log_get_level()) {
+        av_log_set_level(level);
+    }
+
+    ~av_log_level_guard() {
+        av_log_set_level(previous_);
+    }
+
+    av_log_level_guard(const av_log_level_guard&) = delete;
+    av_log_level_guard& operator=(const av_log_level_guard&) = delete;
+
+private:
+    int previous_;
+};
+
+}  // namespace
+#endif
+
 struct nvdec_decoder::impl {
 #if MIRAGE_HAS_NVDEC
     const AVCodec* codec = nullptr;
@@ -78,8 +102,13 @@ result<nvdec_decoder> nvdec_decoder::create(video_codec codec) {
     if (!impl_ptr->ctx) {
         return std::unexpected(mirage_error::decode("NVDEC: failed to allocate context"));
     }
-    if (av_hwdevice_ctx_create(&impl_ptr->hw_device_ctx, AV_HWDEVICE_TYPE_CUDA, nullptr, nullptr,
-                               0) < 0) {
+    int hw_result = 0;
+    {
+        av_log_level_guard quiet_probe{AV_LOG_QUIET};
+        hw_result = av_hwdevice_ctx_create(&impl_ptr->hw_device_ctx, AV_HWDEVICE_TYPE_CUDA,
+                                           nullptr, nullptr, 0);
+    }
+    if (hw_result < 0) {
         return std::unexpected(mirage_error::decode("NVDEC: CUDA device not available"));
     }
     impl_ptr->ctx->hw_device_ctx = av_buffer_ref(impl_ptr->hw_device_ctx);
