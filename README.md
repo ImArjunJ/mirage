@@ -7,36 +7,28 @@ miracast / wi-fi display. the main usable path today is airplay from ios.
 
 ## quick start
 
-arch linux:
+download the latest release:
+
+<https://github.com/ImArjunJ/mirage/releases/latest>
+
+linux:
 
 ```sh
-sudo pacman -S --needed base-devel git cmake ninja clang pkgconf openssl ffmpeg vulkan-headers vulkan-loader shaderc libx11 wayland libva
-git clone https://github.com/ImArjunJ/mirage.git
-cd mirage
-CMAKE_GENERATOR=Ninja CC=clang CXX=clang++ ./scripts/install.sh
+curl -LO https://github.com/ImArjunJ/mirage/releases/download/v0.1.0/mirage-0.1.0-Linux-x86_64.zip
+unzip mirage-0.1.0-Linux-x86_64.zip
+cd mirage-0.1.0-Linux-x86_64
+./install.sh
 export PATH="$HOME/.local/bin:$PATH"
 mirage doctor
 mirage --diagnostics
 ```
 
-ubuntu/debian:
-
-```sh
-sudo apt update
-sudo apt install -y build-essential git cmake ninja-build clang pkg-config libssl-dev ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libvulkan-dev glslc libx11-dev libwayland-dev libva-dev
-git clone https://github.com/ImArjunJ/mirage.git
-cd mirage
-CMAKE_GENERATOR=Ninja CC=clang CXX=clang++ ./scripts/install.sh
-export PATH="$HOME/.local/bin:$PATH"
-mirage doctor
-mirage --diagnostics
-```
-
-windows from a zip:
+windows powershell:
 
 ```powershell
-Expand-Archive .\mirage-*.zip -DestinationPath .\mirage-package
-cd .\mirage-package\mirage-*
+Invoke-WebRequest https://github.com/ImArjunJ/mirage/releases/download/v0.1.0/mirage-0.1.0-Windows-AMD64.zip -OutFile mirage.zip
+Expand-Archive .\mirage.zip -DestinationPath .\mirage
+cd .\mirage\mirage-0.1.0-Windows-AMD64
 .\install.ps1 -AddToPath
 mirage doctor
 mirage --diagnostics
@@ -54,6 +46,7 @@ mirage service logs -f
 ```
 
 on windows, run the service install commands from an elevated powershell.
+open a new terminal if `mirage` is not found after install.
 
 ## status
 
@@ -64,6 +57,8 @@ on windows, run the service install commands from an elevated powershell.
 - protected content is not supported
 
 full setup and troubleshooting: [docs/user-guide.md](docs/user-guide.md)
+
+source builds are covered in the user guide.
 
 ## common commands
 
