@@ -94,13 +94,20 @@ int main() {
     mirage::receiver_client_status client;
     client.protocol_id = mirage::protocol::cast;
     client.address = "192.0.2.20";
-    client.state = "connected";
+    client.state = mirage::receiver_client_state::connected;
     client.connected_at = 123500;
     const auto client_id = tracker.client_connected(std::move(client));
     ok &= expect(client_id == 1, "client id mismatch");
     ok &= expect(
         adapters.find(mirage::protocol::cast)->state == mirage::receiver_adapter_state::running,
         "adapter did not enter running state");
+    json = read_text(status_path);
+    auto summary = mirage::parse_status_summary(json);
+    ok &= expect(summary.clients.size() == 1, "connected client count mismatch");
+    if (!summary.clients.empty()) {
+        ok &= expect(summary.clients.front().state == "connected",
+                     "new client state should be connected");
+    }
 
     tracker.client_stream_updated(client_id, {
                                                  .kind = "audio",
@@ -125,12 +132,14 @@ int main() {
     tracker.client_media_updated(client_id, std::move(media));
 
     json = read_text(status_path);
-    auto summary = mirage::parse_status_summary(json);
+    summary = mirage::parse_status_summary(json);
     ok &= expect(contains(json, "\"pid\":42"), "updated status pid missing");
     ok &= expect(summary.name == "Living Room", "parsed name mismatch");
     ok &= expect(summary.clients.size() == 1, "client count mismatch");
     if (!summary.clients.empty()) {
         ok &= expect(summary.clients.front().name == "cast", "default client name mismatch");
+        ok &= expect(summary.clients.front().state == "streaming",
+                     "active client state should be streaming");
         ok &= expect(summary.clients.front().media.title == "track", "media title mismatch");
         ok &= expect(summary.clients.front().streams.size() == 2, "stream count mismatch");
         bool found_media_stream = false;

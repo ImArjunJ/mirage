@@ -224,7 +224,7 @@ io::task<void> wfd_session::run() {
                     .protocol_id = protocol::miracast,
                     .name = "",
                     .address = socket.remote_endpoint().addr.to_string(),
-                    .state = "connected",
+                    .state = receiver_client_state::connected,
                     .connected_at = 0,
                     .media = {},
                     .streams = {},

@@ -2349,7 +2349,7 @@ io::task<void> rtsp_server::run() {
                     .protocol_id = source_.id,
                     .name = "",
                     .address = socket.remote_endpoint().addr.to_string(),
-                    .state = "connected",
+                    .state = receiver_client_state::connected,
                     .connected_at = 0,
                     .media = {},
                     .streams = {},

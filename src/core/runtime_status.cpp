@@ -10,6 +10,14 @@
 #include "core/status_report.hpp"
 
 namespace mirage {
+namespace {
+
+bool stream_indicates_activity(const receiver_client_stream_status& stream) {
+    return (stream.kind == "audio" && stream.decoded_packets > 0) ||
+           (stream.kind == "video" && stream.frames > 0);
+}
+
+}  // namespace
 
 bool write_runtime_status_json(const std::filesystem::path& status_path, int pid, const config& cfg,
                                const std::string& ip, const std::string& iface_name,
@@ -121,6 +129,18 @@ void runtime_status_tracker::client_disconnected(uint64_t client_id) {
     static_cast<void>(write_unlocked());
 }
 
+void runtime_status_tracker::client_state_updated(uint64_t client_id, receiver_client_state state) {
+    std::scoped_lock lock(mutex_);
+
+    auto client = std::ranges::find(clients_, client_id, &receiver_client_status::id);
+    if (client == clients_.end()) {
+        return;
+    }
+
+    client->state = state;
+    static_cast<void>(write_unlocked());
+}
+
 void runtime_status_tracker::client_stream_updated(uint64_t client_id,
                                                    receiver_client_stream_status stream) {
     std::scoped_lock lock(mutex_);
@@ -132,10 +152,17 @@ void runtime_status_tracker::client_stream_updated(uint64_t client_id,
 
     auto existing =
         std::ranges::find(client->streams, stream.kind, &receiver_client_stream_status::kind);
+    const receiver_client_stream_status* updated_stream = nullptr;
     if (existing == client->streams.end()) {
         client->streams.push_back(std::move(stream));
+        updated_stream = &client->streams.back();
     } else {
         *existing = std::move(stream);
+        updated_stream = &*existing;
+    }
+    if (updated_stream != nullptr && stream_indicates_activity(*updated_stream) &&
+        client->state == receiver_client_state::connected) {
+        client->state = receiver_client_state::streaming;
     }
     static_cast<void>(write_unlocked());
 }

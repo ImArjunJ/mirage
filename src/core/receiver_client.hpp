@@ -2,11 +2,39 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "core/core.hpp"
 
 namespace mirage {
+
+enum class receiver_client_state : uint8_t {
+    connecting,
+    connected,
+    streaming,
+    draining,
+    disconnected,
+    error
+};
+
+constexpr std::string_view to_string(receiver_client_state state) {
+    switch (state) {
+        case receiver_client_state::connecting:
+            return "connecting";
+        case receiver_client_state::connected:
+            return "connected";
+        case receiver_client_state::streaming:
+            return "streaming";
+        case receiver_client_state::draining:
+            return "draining";
+        case receiver_client_state::disconnected:
+            return "disconnected";
+        case receiver_client_state::error:
+            return "error";
+    }
+    std::unreachable();
+}
 
 struct receiver_client_stream_status {
     std::string kind;
@@ -46,7 +74,7 @@ struct receiver_client_status {
     protocol protocol_id = protocol::airplay;
     std::string name;
     std::string address;
-    std::string state = "connected";
+    receiver_client_state state = receiver_client_state::connected;
     int64_t connected_at = 0;
     receiver_client_media_status media;
     std::vector<receiver_client_stream_status> streams;
@@ -58,6 +86,10 @@ public:
 
     virtual uint64_t client_connected(receiver_client_status client) = 0;
     virtual void client_disconnected(uint64_t client_id) = 0;
+    virtual void client_state_updated(uint64_t client_id, receiver_client_state state) {
+        static_cast<void>(client_id);
+        static_cast<void>(state);
+    }
     virtual void client_stream_updated(uint64_t client_id,
                                        receiver_client_stream_status stream) {
         static_cast<void>(client_id);

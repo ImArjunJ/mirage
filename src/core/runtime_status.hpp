@@ -33,6 +33,7 @@ public:
 
     uint64_t client_connected(receiver_client_status client) override;
     void client_disconnected(uint64_t client_id) override;
+    void client_state_updated(uint64_t client_id, receiver_client_state state) override;
     void client_stream_updated(uint64_t client_id, receiver_client_stream_status stream) override;
     void client_media_updated(uint64_t client_id, receiver_client_media_status media) override;
 

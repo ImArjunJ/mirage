@@ -98,7 +98,7 @@ int main() {
     client.protocol_id = mirage::protocol::airplay;
     client.name = "Junie";
     client.address = "192.0.2.20";
-    client.state = "connected";
+    client.state = mirage::receiver_client_state::streaming;
     client.connected_at = 123460;
     client.media.active = true;
     client.media.title = "song \"one\"";
@@ -180,6 +180,7 @@ int main() {
     ok &= expect(contains(json, "\"protocol\":\"airplay\""), "client protocol missing");
     ok &= expect(contains(json, "\"name\":\"Junie\""), "client name missing");
     ok &= expect(contains(json, "\"address\":\"192.0.2.20\""), "client address missing");
+    ok &= expect(contains(json, "\"state\":\"streaming\""), "client state missing");
     ok &= expect(contains(json, "\"connected_at\":123460"), "client connected time missing");
     ok &= expect(contains(json, "\"media\":{\"active\":true"), "client media missing");
     ok &= expect(contains(json, "\"title\":\"song \\\"one\\\"\""), "media title missing");
@@ -213,6 +214,7 @@ int main() {
     ok &= expect(summary.protocols.size() == 3, "summary protocol count mismatch");
     ok &= expect(summary.clients.size() == 1, "summary client count mismatch");
     if (!summary.clients.empty()) {
+        ok &= expect(summary.clients[0].state == "streaming", "summary client state mismatch");
         ok &= expect(summary.clients[0].media.title == "song \"one\"",
                      "summary media title mismatch");
         ok &= expect(summary.clients[0].streams.size() == 3, "summary stream count mismatch");
