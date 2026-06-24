@@ -127,10 +127,10 @@ def varint_field(field, value):
     return key(field, 0) + varint(value)
 
 
-def cast_message(namespace, payload):
+def cast_message(namespace, payload, source="sender-0"):
     body = bytearray()
     body += varint_field(1, 0)
-    body += string_field(2, "sender-0")
+    body += string_field(2, source)
     body += string_field(3, "receiver-0")
     body += string_field(4, namespace)
     body += varint_field(5, 0)
@@ -298,15 +298,24 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
             cast_message(
                 "urn:x-cast:com.google.cast.tp.connection",
                 '{"type":"CONNECT"}',
+                "sender-1",
             )
             + cast_message(
                 "urn:x-cast:com.google.cast.receiver",
                 '{"type":"GET_STATUS","requestId":81}',
+                "sender-1",
             )
             + cast_message(
                 "urn:x-cast:com.google.cast.media",
                 '{"type":"GET_STATUS","requestId":82}',
+                "sender-1",
             )
+        )
+        wait_status_contains(
+            '"protocol":"cast"',
+            '"kind":"control"',
+            '"health":"clean"',
+            '"reason":"channel_connected:sender-1"',
         )
         shared_receiver = recv_frame(second)
         assert b"RECEIVER_STATUS" in shared_receiver
@@ -319,6 +328,20 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
         assert b'"mediaSessionId":1' in shared_media
         assert b'"title":"cast song"' in shared_media
         assert b'"requestId":82' in shared_media
+
+        second.sendall(
+            cast_message(
+                "urn:x-cast:com.google.cast.tp.connection",
+                '{"type":"CLOSE"}',
+                "sender-1",
+            )
+        )
+        wait_status_contains(
+            '"protocol":"cast"',
+            '"kind":"control"',
+            '"health":"clean"',
+            '"reason":"channel_closed:sender-1"',
+        )
 
     sock.sendall(
         cast_message(
@@ -496,6 +519,8 @@ wait "${pid}"
 pid=
 
 grep -q "Cast stream setup: mode=tls_control_status" "${tmpdir}/err"
+grep -q "Cast channel: connected source=sender-1" "${tmpdir}/err"
+grep -q "Cast channel: closed source=sender-1" "${tmpdir}/err"
 grep -q "Cast app: default media receiver running" "${tmpdir}/err"
 grep -q "Cast control: volume_updated=muted" "${tmpdir}/err"
 grep -q "Cast control: invalid_request=INVALID_COMMAND" "${tmpdir}/err"

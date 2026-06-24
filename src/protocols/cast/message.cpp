@@ -417,6 +417,29 @@ receiver_client_media_status receiver_media_status(const channel_session_state& 
     };
 }
 
+bool add_connected_source(channel_session_state& state, std::string_view source_id) {
+    if (source_id.empty()) {
+        return false;
+    }
+    auto existing = std::find(state.connected_sources.begin(), state.connected_sources.end(),
+                              source_id);
+    if (existing != state.connected_sources.end()) {
+        return false;
+    }
+    state.connected_sources.emplace_back(source_id);
+    return true;
+}
+
+bool remove_connected_source(channel_session_state& state, std::string_view source_id) {
+    auto existing = std::find(state.connected_sources.begin(), state.connected_sources.end(),
+                              source_id);
+    if (existing == state.connected_sources.end()) {
+        return false;
+    }
+    state.connected_sources.erase(existing);
+    return true;
+}
+
 void clear_media_session(channel_session_state& state) {
     state.media_session_active = false;
     state.media_current_time = 0.0;
@@ -699,6 +722,28 @@ channel_message_result handle_channel_message_result(const channel_message& mess
 
     auto type = extract_json_string(message.payload_utf8, "type");
     if (!type) {
+        return result;
+    }
+
+    if (message.namespace_ == namespace_connection) {
+        if (*type == "CONNECT") {
+            if (add_connected_source(state, message.source_id)) {
+                result.activity = {
+                    .event = channel_event::channel_connected,
+                    .detail = message.source_id,
+                };
+            }
+            return result;
+        }
+        if (*type == "CLOSE") {
+            if (remove_connected_source(state, message.source_id)) {
+                result.activity = {
+                    .event = channel_event::channel_closed,
+                    .detail = message.source_id,
+                };
+            }
+            return result;
+        }
         return result;
     }
 

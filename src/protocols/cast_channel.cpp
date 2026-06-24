@@ -95,6 +95,22 @@ void publish_cast_activity(receiver_session_observer* observer, uint64_t client_
     switch (activity.event) {
         case cast::channel_event::none:
             break;
+        case cast::channel_event::channel_connected:
+            if (observer != nullptr && client_status_id != 0) {
+                observer->client_stream_updated(
+                    client_status_id,
+                    control_stream_status(std::format("channel_connected:{}", activity.detail)));
+            }
+            mirage::log::diagnostic("Cast channel: connected source={}", activity.detail);
+            break;
+        case cast::channel_event::channel_closed:
+            if (observer != nullptr && client_status_id != 0) {
+                observer->client_stream_updated(
+                    client_status_id,
+                    control_stream_status(std::format("channel_closed:{}", activity.detail)));
+            }
+            mirage::log::diagnostic("Cast channel: closed source={}", activity.detail);
+            break;
         case cast::channel_event::default_media_started:
             if (observer != nullptr && client_status_id != 0) {
                 observer->client_stream_updated(client_status_id,

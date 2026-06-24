@@ -39,6 +39,8 @@ struct channel_message {
 
 enum class channel_event : uint8_t {
     none,
+    channel_connected,
+    channel_closed,
     default_media_started,
     default_media_stopped,
     volume_updated,
@@ -61,6 +63,7 @@ struct channel_message_result {
 };
 
 struct channel_session_state {
+    std::vector<std::string> connected_sources;
     bool default_media_running = false;
     double volume_level = 1.0;
     bool volume_muted = false;

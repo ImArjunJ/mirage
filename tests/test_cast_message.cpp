@@ -92,8 +92,48 @@ int main() {
         .payload_utf8 = "{\"type\":\"CONNECT\"}",
         .payload_binary = {},
     };
-    ok &= expect(handle_channel_message(connect, "Living Room").empty(),
-                 "connect should not require a response");
+    channel_session_state connection_state;
+    auto connect_result = handle_channel_message_result(connect, "Living Room", connection_state);
+    ok &= expect(connect_result.responses.empty(), "connect should not require a response");
+    ok &= expect(connect_result.activity.event == channel_event::channel_connected,
+                 "connect activity mismatch");
+    ok &= expect(connect_result.activity.detail == "sender-2", "connect activity detail");
+    ok &= expect(connection_state.connected_sources.size() == 1, "connect source count");
+    if (!connection_state.connected_sources.empty()) {
+        ok &= expect(connection_state.connected_sources.front() == "sender-2",
+                     "connect source mismatch");
+    }
+
+    auto duplicate_connect_result =
+        handle_channel_message_result(connect, "Living Room", connection_state);
+    ok &= expect(duplicate_connect_result.responses.empty(),
+                 "duplicate connect should not require a response");
+    ok &= expect(duplicate_connect_result.activity.event == channel_event::none,
+                 "duplicate connect activity mismatch");
+    ok &= expect(connection_state.connected_sources.size() == 1,
+                 "duplicate connect source count");
+
+    channel_message close{
+        .protocol_version = 0,
+        .source_id = "sender-2",
+        .destination_id = "receiver-0",
+        .namespace_ = std::string(namespace_connection),
+        .payload_type = channel_payload_type::string_payload,
+        .payload_utf8 = "{\"type\":\"CLOSE\"}",
+        .payload_binary = {},
+    };
+    auto close_result = handle_channel_message_result(close, "Living Room", connection_state);
+    ok &= expect(close_result.responses.empty(), "close should not require a response");
+    ok &= expect(close_result.activity.event == channel_event::channel_closed,
+                 "close activity mismatch");
+    ok &= expect(close_result.activity.detail == "sender-2", "close activity detail");
+    ok &= expect(connection_state.connected_sources.empty(), "close source count");
+
+    auto stale_close_result = handle_channel_message_result(close, "Living Room", connection_state);
+    ok &= expect(stale_close_result.responses.empty(),
+                 "stale close should not require a response");
+    ok &= expect(stale_close_result.activity.event == channel_event::none,
+                 "stale close activity mismatch");
 
     channel_message availability{
         .protocol_version = 0,
