@@ -26,6 +26,7 @@
 
 #include "core/core.hpp"
 #include "core/cli_options.hpp"
+#include "core/doctor_checks.hpp"
 #include "core/log.hpp"
 #include "core/port_probe.hpp"
 #include "core/receiver_adapter.hpp"
@@ -156,6 +157,36 @@ std::string inspect_port_command(uint16_t port) {
 #else
     return std::format("lsof -i :{}", port);
 #endif
+}
+
+std::optional<std::string> environment_value(std::string_view name) {
+    auto key = std::string(name);
+    const char* value = std::getenv(key.c_str());
+    if (value == nullptr || value[0] == '\0') {
+        return std::nullopt;
+    }
+    return std::string(value);
+}
+
+void print_doctor_check(const mirage::doctor::check_result& check, bool& ok) {
+    switch (check.level) {
+        case mirage::doctor::check_level::ok:
+            std::println("  {}: {}", check.name, check.detail);
+            break;
+        case mirage::doctor::check_level::note:
+            std::println("  {}: {}", check.name, check.detail);
+            if (!check.fix.empty()) {
+                std::println("  note: {}", check.fix);
+            }
+            break;
+        case mirage::doctor::check_level::error:
+            ok = false;
+            std::println("  {}: {}", check.name, check.detail);
+            if (!check.fix.empty()) {
+                std::println("check: {}", check.fix);
+            }
+            break;
+    }
 }
 
 int handle_paths(int argc, char* argv[]) {
@@ -340,7 +371,16 @@ int handle_doctor(int argc, char* argv[]) {
         }
     }
 
-    std::println("dependencies: openssl linked, ffmpeg linked, vulkan linked");
+    std::println("dependencies:");
+    for (const auto& check : mirage::doctor::collect_runtime_checks()) {
+        print_doctor_check(check, ok);
+    }
+
+    std::println("backends:");
+    for (const auto& check : mirage::doctor::collect_backend_hints(environment_value)) {
+        print_doctor_check(check, ok);
+    }
+
     std::println("result: {}", ok ? "ready" : "attention");
     return ok ? 0 : 1;
 }

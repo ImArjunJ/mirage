@@ -101,6 +101,7 @@ set(MIRAGE_CORE_SOURCES
     src/core/error.cpp
     src/core/cli_options.cpp
     src/core/config.cpp
+    src/core/doctor_checks.cpp
     src/core/port_probe.cpp
     src/core/receiver_identity.cpp
     src/core/receiver_adapter.cpp
@@ -317,6 +318,16 @@ if(BUILD_TESTING)
     mirage_add_unit_test(runtime_process mirage_runtime_process_test
         tests/test_runtime_process.cpp
         src/core/runtime_process.cpp
+    )
+
+    mirage_add_unit_test(doctor_checks mirage_doctor_checks_test
+        tests/test_doctor_checks.cpp
+        src/core/doctor_checks.cpp
+    )
+    target_link_libraries(mirage_doctor_checks_test PRIVATE
+        OpenSSL::Crypto
+        Vulkan::Vulkan
+        PkgConfig::FFMPEG
     )
 
     mirage_add_unit_test(port_probe mirage_port_probe_test
