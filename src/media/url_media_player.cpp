@@ -210,7 +210,7 @@ int interrupt_callback(void* opaque) {
 }  // namespace
 
 struct url_media_player::impl {
-    std::jthread worker;
+    std::thread worker;
     std::atomic_bool stop_requested{false};
 
     mutable std::mutex status_mutex;
@@ -472,7 +472,7 @@ void url_media_player::load(remote_media_load request) {
     }
 
     impl_->stop_requested.store(false, std::memory_order_relaxed);
-    impl_->worker = std::jthread(
+    impl_->worker = std::thread(
         [impl = impl_.get(), request = std::move(request)] { impl->run(request); });
 }
 
