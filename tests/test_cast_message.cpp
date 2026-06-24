@@ -345,6 +345,7 @@ int main() {
         ok &= expect(state.accepted_media_loads == 1, "load count mismatch");
         ok &= expect(state.media_session_active, "load state mismatch");
         ok &= expect(load_result.media_status.has_value(), "load media status missing");
+        ok &= expect(load_result.media_load.has_value(), "load media request missing");
         if (load_result.media_status) {
             ok &= expect(load_result.media_status->active, "load media status inactive");
             ok &= expect(load_result.media_status->title == "cast song",
@@ -357,6 +358,23 @@ int main() {
                          "load media status position mismatch");
             ok &= expect(load_result.media_status->duration_ms == 123400,
                          "load media status duration mismatch");
+        }
+        if (load_result.media_load) {
+            ok &= expect(load_result.media_load->url == "https://example.test/song.mp3",
+                         "load media request url mismatch");
+            ok &= expect(load_result.media_load->content_type == "audio/mpeg",
+                         "load media request content type mismatch");
+            ok &= expect(load_result.media_load->title == "cast song",
+                         "load media request title mismatch");
+            ok &= expect(load_result.media_load->artist == "cast artist",
+                         "load media request artist mismatch");
+            ok &= expect(load_result.media_load->album == "cast album",
+                         "load media request album mismatch");
+            ok &= expect(load_result.media_load->start_time == 4.5,
+                         "load media request start mismatch");
+            ok &= expect(load_result.media_load->duration == 123.4,
+                         "load media request duration mismatch");
+            ok &= expect(load_result.media_load->autoplay, "load media request autoplay mismatch");
         }
     }
 

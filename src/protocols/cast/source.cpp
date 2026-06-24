@@ -30,15 +30,15 @@ receiver_source_descriptor make_cast_receiver_source(const config& cfg) {
         .port = cfg.cast_port,
         .enabled = cfg.enable_cast,
         .experimental = true,
-        .detail = "cast v2 app/media control receiver",
+        .detail = "cast v2 app/media receiver",
         .capabilities =
             {
                 .network_listener = true,
                 .discovery = true,
                 .pairing = false,
                 .media_setup = true,
-                .audio = false,
-                .video = false,
+                .audio = true,
+                .video = true,
                 .remote_control = true,
                 .app_lifecycle = true,
                 .media_control = true,

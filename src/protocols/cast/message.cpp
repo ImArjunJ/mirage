@@ -878,6 +878,16 @@ channel_message_result handle_channel_message_result(const channel_message& mess
             .detail = state.media_title.empty() ? state.media_content_id : state.media_title,
         };
         result.media_status = receiver_media_status(state);
+        result.media_load = channel_media_load{
+            .url = state.media_content_id,
+            .content_type = state.media_content_type,
+            .title = state.media_title,
+            .artist = state.media_artist,
+            .album = state.media_album,
+            .start_time = state.media_current_time,
+            .duration = state.media_duration,
+            .autoplay = autoplay,
+        };
         return result;
     }
 

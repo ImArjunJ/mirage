@@ -56,10 +56,22 @@ struct channel_activity {
     std::string detail;
 };
 
+struct channel_media_load {
+    std::string url;
+    std::string content_type;
+    std::string title;
+    std::string artist;
+    std::string album;
+    double start_time = 0.0;
+    double duration = 0.0;
+    bool autoplay = true;
+};
+
 struct channel_message_result {
     std::vector<channel_message> responses;
     channel_activity activity;
     std::optional<receiver_client_media_status> media_status;
+    std::optional<channel_media_load> media_load;
 };
 
 struct channel_session_state {

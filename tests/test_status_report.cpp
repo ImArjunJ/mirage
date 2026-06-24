@@ -55,14 +55,14 @@ int main() {
             .port = 8009,
             .enabled = true,
             .experimental = true,
-            .detail = "cast v2 app/media control receiver",
+            .detail = "cast v2 app/media receiver",
             .capabilities =
                 {
                     .network_listener = true,
                     .discovery = true,
                     .media_setup = true,
-                    .audio = false,
-                    .video = false,
+                    .audio = true,
+                    .video = true,
                     .remote_control = true,
                     .app_lifecycle = true,
                     .media_control = true,
@@ -225,7 +225,7 @@ int main() {
                  "verbose airplay line mismatch");
     ok &= expect(contains(verbose_text,
                           "    cast: error, port 8009, transport cast-v2, "
-                          "apps/media/remote/metadata, bind \"failed\"\n"),
+                          "audio/video/apps/media/remote/metadata, bind \"failed\"\n"),
                  "verbose cast line mismatch");
     ok &= expect(contains(verbose_text,
                           "      media: song \"one\" - artist, album album, "

@@ -128,6 +128,7 @@ set(MIRAGE_DISCOVERY_SOURCES
 
 set(MIRAGE_MEDIA_SOURCES
     src/media/local_media_sink.cpp
+    src/media/url_media_player.cpp
     src/media/vaapi_decoder.cpp
     src/media/nvdec_decoder.cpp
     src/media/ffmpeg_decoder.cpp

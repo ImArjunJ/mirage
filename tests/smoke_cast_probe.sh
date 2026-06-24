@@ -269,7 +269,7 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
         cast_message(
             "urn:x-cast:com.google.cast.media",
             '{"type":"LOAD","requestId":8,'
-            '"media":{"contentId":"https://example.test/song.mp3",'
+            '"media":{"contentId":"file:///definitely/missing/mirage-cast-smoke.mp3",'
             '"contentType":"audio/mpeg","duration":123.4,'
             '"metadata":{"title":"cast song","artist":"cast artist",'
             '"albumName":"cast album"}},'
@@ -290,7 +290,7 @@ with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as soc
         '"artist":"cast artist"',
         '"kind":"media"',
         '"health":"attention"',
-        '"reason":"loaded_no_renderer:cast song"',
+        '"reason":"renderer_loading:cast song"',
     )
 
     with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2) as second:
@@ -524,7 +524,7 @@ grep -q "Cast channel: closed source=sender-1" "${tmpdir}/err"
 grep -q "Cast app: default media receiver running" "${tmpdir}/err"
 grep -q "Cast control: volume_updated=muted" "${tmpdir}/err"
 grep -q "Cast control: invalid_request=INVALID_COMMAND" "${tmpdir}/err"
-grep -q "Cast media: loaded metadata" "${tmpdir}/err"
+grep -q "Cast media: renderer loading cast song" "${tmpdir}/err"
 grep -q "Cast media: virtual playback command=PLAY" "${tmpdir}/err"
 grep -q "Cast media: invalid_request=INVALID_COMMAND" "${tmpdir}/err"
 test -s "${tmpdir}/state/mirage/identity.key"
