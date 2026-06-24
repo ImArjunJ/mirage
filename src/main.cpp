@@ -53,10 +53,6 @@ void print_help() {
     std::println(stderr, "");
     std::println(stderr, "usage:");
     std::println(stderr, "  mirage                      run in foreground");
-    std::println(stderr, "  mirage --daemon             run in background");
-    std::println(stderr, "  mirage stop                 stop background instance");
-    std::println(stderr, "  mirage status               show current state");
-    std::println(stderr, "  mirage status -v            show detailed state");
     std::println(stderr, "  mirage service <command>    manage background service");
     std::println(stderr, "  mirage paths                show runtime file paths");
     std::println(stderr, "  mirage doctor               check startup configuration");

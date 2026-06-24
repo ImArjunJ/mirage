@@ -209,19 +209,19 @@ mirage service install --config ~/.config/mirage/config.conf
 mirage service install --config C:\ProgramData\mirage\config.conf
 ```
 
-if linux user systemd is not available, use the low-level background process:
-
-```sh
-mirage --daemon
-mirage status -v
-mirage stop
-```
-
 use a persistent identity key if you do not want clients to see a fresh receiver
 identity after every rebuild:
 
 ```sh
 mirage --identity-key ~/.config/mirage/identity.key
+```
+
+advanced linux fallback, for machines without user systemd:
+
+```sh
+mirage --daemon
+mirage status -v
+mirage stop
 ```
 
 ## network notes
