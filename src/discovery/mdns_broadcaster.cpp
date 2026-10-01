@@ -155,7 +155,9 @@ io::task<result<void>> mdns_broadcaster::announce() {
 io::task<void> mdns_broadcaster::run() {
     running_ = true;
     std::array<std::byte, 9000> buffer{};
-    co_await announce();
+    if (auto announced = co_await announce(); !announced) {
+        mirage::log::warn("mDNS announcement failed: {}", announced.error().message);
+    }
     while (running_) {
         try {
             io::endpoint sender;
@@ -164,7 +166,9 @@ io::task<void> mdns_broadcaster::run() {
             if (is_query_for_our_services(packet)) {
                 mirage::log::debug("Received mDNS query from {}, responding",
                                    sender.addr.to_string());
-                co_await announce();
+                if (auto announced = co_await announce(); !announced) {
+                    mirage::log::warn("mDNS announcement failed: {}", announced.error().message);
+                }
             }
         } catch (const std::system_error& e) {
             if (running_ && e.code() != std::errc::operation_canceled) {

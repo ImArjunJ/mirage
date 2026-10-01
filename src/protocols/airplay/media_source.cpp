@@ -295,9 +295,22 @@ void media_source::process_audio_packet(std::span<const std::byte> rtp_packet, b
     if (audio_keys_ready_ && payload_len > 0) {
         auto encrypted_len = (payload_len / 16) * 16;
         if (encrypted_len > 0) {
-            crypto::aes_cbc_decrypt(audio_aes_key_, audio_aes_iv_,
-                                    std::span<const std::byte>(payload_start, encrypted_len),
-                                    std::span<std::byte>(decrypted.data(), encrypted_len));
+            auto decrypted_len = crypto::aes_cbc_decrypt(
+                audio_aes_key_, audio_aes_iv_,
+                std::span<const std::byte>(payload_start, encrypted_len),
+                std::span<std::byte>(decrypted.data(), encrypted_len));
+            if (!decrypted_len) {
+                ++audio_stats_.invalid;
+                log::warn("Skipping audio packet after AES-CBC decrypt failed: {}",
+                          decrypted_len.error().message);
+                return;
+            }
+            if (*decrypted_len != encrypted_len) {
+                ++audio_stats_.invalid;
+                log::warn("Skipping audio packet after short AES-CBC decrypt: {} of {} bytes",
+                          *decrypted_len, encrypted_len);
+                return;
+            }
         }
         if (payload_len > encrypted_len) {
             std::copy_n(payload_start + encrypted_len, payload_len - encrypted_len,

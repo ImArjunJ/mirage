@@ -687,7 +687,12 @@ io::task<result<void>> rtsp_session::run() {
                 .headers = {{"CSeq", std::to_string(cseq_)}},
                 .body = {},
             };
-            co_await send_response(err_resp);
+            auto send_error_result = co_await send_response(err_resp);
+            if (!send_error_result) {
+                state_ = rtsp_session_state::teardown;
+                close_stream_sockets();
+                co_return std::unexpected(send_error_result.error());
+            }
             continue;
         }
         auto send_result = co_await send_response(*response);
